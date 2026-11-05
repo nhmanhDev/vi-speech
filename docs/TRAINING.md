@@ -98,3 +98,14 @@ trầm 12,9 semitone (±1,4 st), tổng thời lượng 18,2 / 17,1 / 19,3 s (±
 |---|---|---|
 | Kiểm pipeline STT học được | 1M tham số, 1,5 h InfoRe, 1.500 bước | CER dev 0,23; ONNX offline/streaming/int8 khớp nhau |
 | Kiểm pipeline TTS | 3,2M tham số, 1,3 h, 3.000 bước | Học được độ dài câu, chưa ra chữ (CER ~0,9). Chỉ để kiểm code |
+
+## 2026-11-05 chiều: dừng STT v2 và TTS phiên 2, chuyển hướng
+
+- Anh Mạnh dừng cả 2 lượt (khoảng 15:20 UTC). STT v2 dừng ở khoảng bước 31.000 (dev: offline WER 14,6%,
+  streaming + EMA 16,1% ở bước 30.000). TTS Matcha phiên 2 dừng ở khoảng bước 37.000; Kaggle không lưu output khi huỷ.
+- Lý do: tạm gác STT (đã có nhiều model STT tiếng Việt nhỏ đủ tốt), tập trung TTS với yêu cầu mới: giọng tự nhiên,
+  clone từ ~10 s audio, thẻ cảm xúc / âm thanh không lời kiểu ElevenLabs. Train từ đầu trên quota Kaggle free không
+  đạt được mức này → chuyển sang fine-tune model mở đã clone được (VieNeu v3 Turbo, Apache-2.0).
+- Quota GPU tuần này còn khoảng 10 giờ; không chạy gì thêm trên Kaggle khi chưa được duyệt.
+- Mốc nền VieNeu v3 Turbo gốc (CPU 4 vCPU Xeon có VNNI): clone 4 giọng từ 10 s, CER câu thường 0–4%
+  (PhoWhisper-small); RTF fp32 ~1,0, int8 ~0,75 (không tính lần mã hoá audio mẫu đầu tiên 5–8 s).
