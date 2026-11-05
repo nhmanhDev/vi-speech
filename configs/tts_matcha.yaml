@@ -1,0 +1,15 @@
+# Matcha-TTS cỡ chuẩn (paper): ~18,5M tham số. 1 giọng (InfoRe1).
+model:
+  enc_dim: 192
+  enc_layers: 6
+  enc_heads: 2
+  enc_ff: 768
+  dec_channels: [256, 256]
+  dec_mid_blocks: 2
+train:
+  lr: 1.0e-4          # Matcha gốc: Adam 1e-4
+  warmup_steps: 1000
+  total_steps: 300000
+  max_batch_frames: 24000   # mel frame 24 kHz/256 hop (~94 fps) -> ~4,3 phút audio / GPU / batch
+  max_cer: 0.05
+  eval_every: 5000

@@ -100,6 +100,23 @@ sh("rm -rf /kaggle/working/runs_prev")
 '''
 
 
+TTS_TRAIN = BOOTSTRAP + r'''
+srcs = [os.path.dirname(p) for p in sorted(glob.glob("/kaggle/input/**/tts/*/meta.json", recursive=True))]
+dsts = []
+for s_ in srcs:  # copy sang ổ local (ổ /kaggle/input đọc ngẫu nhiên rất chậm)
+    d_ = "/tmp/tts/" + os.path.basename(s_)
+    sh(f"mkdir -p /tmp/tts && cp -r {{s_}} {{d_}}")
+    dsts.append(d_)
+resume = " ".join(glob.glob("/kaggle/input/**/runs/{run}", recursive=True))
+sh(f"cp -r {{resume}} /kaggle/working/runs_prev || true") if resume else None
+import torch
+ngpu = max(1, torch.cuda.device_count())
+sh(f"torchrun --standalone --nproc_per_node={{ngpu}} -m vispeech.tts.train --config {{ROOT}}/{config} --data {{' '.join(dsts)}} "
+   f"--out /kaggle/working/runs/{run} --resume /kaggle/working/runs_prev --max-hours {max_hours}")
+sh("rm -rf /kaggle/working/runs_prev")
+'''
+
+
 def push_kernel(slug: str, title: str, code: str, gpu: bool, datasets: list[str], kernels: list[str]):
     with tempfile.TemporaryDirectory() as d:
         with open(os.path.join(d, "main.py"), "w") as f:
@@ -161,6 +178,14 @@ def cmd_train(args):
     push_kernel(slug, f"vi-speech-train-{args.run}", code, gpu=True, datasets=[f"{user}/{CODE_SLUG}"], kernels=kernels)
 
 
+def cmd_tts_train(args):
+    user = username()
+    slug = f"{user}/vi-speech-train-{args.run}"
+    kernels = [f"{user}/vi-speech-tts-prep-{p}" for p in args.prep] + ([slug] if args.resume else [])
+    code = TTS_TRAIN.format(run=args.run, config=args.config, max_hours=args.max_hours)
+    push_kernel(slug, f"vi-speech-train-{args.run}", code, gpu=True, datasets=[f"{user}/{CODE_SLUG}"], kernels=kernels)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -181,6 +206,12 @@ def main():
     p.add_argument("--run", default="stt-small")
     p.add_argument("--max-hours", type=float, default=11.3)
     p.add_argument("--resume", action="store_true")
+    p = sub.add_parser("tts-train")
+    p.add_argument("--prep", nargs="+", required=True)
+    p.add_argument("--config", default="configs/tts_matcha.yaml")
+    p.add_argument("--run", default="tts-matcha")
+    p.add_argument("--max-hours", type=float, default=11.3)
+    p.add_argument("--resume", action="store_true")
     p = sub.add_parser("status")
     p.add_argument("slug")
     p = sub.add_parser("output")
@@ -194,6 +225,8 @@ def main():
         cmd_prep(args)
     elif args.cmd == "tts-prep":
         cmd_tts_prep(args)
+    elif args.cmd == "tts-train":
+        cmd_tts_train(args)
     elif args.cmd == "train":
         cmd_train(args)
     elif args.cmd == "status":
