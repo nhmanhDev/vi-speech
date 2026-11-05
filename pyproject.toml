@@ -21,6 +21,7 @@ dependencies = [
 dev = ["pytest>=8"]
 kaggle = ["kaggle>=1.7"]
 export = ["onnx>=1.15", "onnxruntime>=1.17"]
+tts = ["pyloudnorm>=0.1", "silero-vad>=5", "vocos>=0.1", "transformers>=4.40"]
 
 [project.scripts]
 vispeech-train-stt = "vispeech.stt.train:main"

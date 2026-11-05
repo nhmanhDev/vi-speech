@@ -54,7 +54,7 @@ assert src, "Không thấy dataset code vi-speech-code trong /kaggle/input"
 ROOT = os.path.dirname(os.path.dirname(src[0]))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 os.environ["PYTHONPATH"] = os.path.join(ROOT, "src")
-subprocess.run([sys.executable, "-m", "pip", "install", "-q", "soxr", "pyyaml", "soundfile", "huggingface_hub"], check=False)
+subprocess.run([sys.executable, "-m", "pip", "install", "-q", "soxr", "pyyaml", "soundfile", "huggingface_hub", "onnxruntime"], check=False)
 print("code:", ROOT, flush=True)
 def sh(cmd):
     print("+", cmd, flush=True)

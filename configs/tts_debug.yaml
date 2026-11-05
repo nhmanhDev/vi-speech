@@ -1,0 +1,14 @@
+model:
+  enc_dim: 96
+  enc_layers: 2
+  enc_ff: 256
+  dp_dim: 128
+  dec_channels: [128, 128]
+  dec_mid_blocks: 1
+train:
+  lr: 1.0e-3
+  warmup_steps: 50
+  max_batch_frames: 6000
+  num_workers: 0
+  log_every: 20
+  eval_every: 100
