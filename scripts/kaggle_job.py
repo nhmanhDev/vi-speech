@@ -117,6 +117,31 @@ sh("rm -rf /kaggle/working/runs_prev")
 '''
 
 
+STT_EXP = BOOTSTRAP + r'''
+# Thí nghiệm song song: mỗi GPU chạy 1 cấu hình, cùng dữ liệu, cùng số giờ -> so sánh công bằng.
+srcs = [os.path.dirname(p) for p in sorted(glob.glob("/kaggle/input/**/prep/*/meta.json", recursive=True))]
+dsts = []
+for s_ in srcs:
+    d_ = "/tmp/prep/" + os.path.basename(s_)
+    sh(f"mkdir -p /tmp/prep && cp -r {{s_}} {{d_}}")
+    dsts.append(d_)
+procs = []
+for gpu, cfg in enumerate({configs}):
+    name = os.path.splitext(os.path.basename(cfg))[0]
+    cmd = (f"CUDA_VISIBLE_DEVICES={{gpu}} python -m vispeech.stt.train --config {{ROOT}}/{{cfg}} --data {{' '.join(dsts)}} "
+           f"--out /kaggle/working/runs/{{name}} --max-hours {max_hours} > /kaggle/working/{{name}}.log 2>&1")
+    print("+", cmd, flush=True)
+    procs.append(subprocess.Popen(cmd, shell=True))
+import time
+while any(p.poll() is None for p in procs):
+    time.sleep(300)
+    for cfg in {configs}:
+        name = os.path.splitext(os.path.basename(cfg))[0]
+        subprocess.run(f"grep -h eval /kaggle/working/{{name}}.log | tail -1 | cut -c1-260", shell=True)
+print("exit codes", [p.returncode for p in procs])
+'''
+
+
 def push_kernel(slug: str, title: str, code: str, gpu: bool, datasets: list[str], kernels: list[str]):
     with tempfile.TemporaryDirectory() as d:
         with open(os.path.join(d, "main.py"), "w") as f:
@@ -186,6 +211,13 @@ def cmd_tts_train(args):
     push_kernel(slug, f"vi-speech-train-{args.run}", code, gpu=True, datasets=[f"{user}/{CODE_SLUG}"], kernels=kernels)
 
 
+def cmd_stt_exp(args):
+    user = username()
+    code = STT_EXP.format(configs=repr(args.configs), max_hours=args.max_hours)
+    push_kernel(f"{user}/vi-speech-exp-{args.name}", f"vi-speech-exp-{args.name}", code, gpu=True,
+                datasets=[f"{user}/{CODE_SLUG}"], kernels=[f"{user}/vi-speech-prep-{p}" for p in args.prep])
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -212,6 +244,11 @@ def main():
     p.add_argument("--run", default="tts-matcha")
     p.add_argument("--max-hours", type=float, default=11.3)
     p.add_argument("--resume", action="store_true")
+    p = sub.add_parser("stt-exp")
+    p.add_argument("--name", required=True)
+    p.add_argument("--configs", nargs="+", required=True, help="tối đa 1 cấu hình / GPU")
+    p.add_argument("--prep", nargs="+", default=["vlsp", "infore"])
+    p.add_argument("--max-hours", type=float, default=2.0)
     p = sub.add_parser("status")
     p.add_argument("slug")
     p = sub.add_parser("output")
@@ -225,6 +262,8 @@ def main():
         cmd_prep(args)
     elif args.cmd == "tts-prep":
         cmd_tts_prep(args)
+    elif args.cmd == "stt-exp":
+        cmd_stt_exp(args)
     elif args.cmd == "tts-train":
         cmd_tts_train(args)
     elif args.cmd == "train":

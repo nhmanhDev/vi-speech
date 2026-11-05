@@ -43,6 +43,7 @@ DEFAULTS = {
         "grad_clip": 5.0,
         "max_utt_frames": 2000,
         "dev_percent": 1.0,
+        "inter_ctc_weight": 0.3,  # chỉ dùng khi model.inter_ctc_layers khác rỗng
         "num_workers": 2,
         "log_every": 50,
         "eval_every": 2000,
@@ -54,10 +55,14 @@ DEFAULTS = {
         "full_context_prob": 0.4,  # tỷ lệ batch train full context
         "max_chunk": 25,  # chunk ngẫu nhiên 1..25 frame (40 ms .. 1 s)
         "max_left_chunks": 8,
+        "min_left_chunks": 1,  # left=0 + chunk nhỏ: attention gần như vô dụng, làm khó tối ưu
+        "start_step": 0,  # trước bước này chỉ train full context (curriculum)
         "eval_chunk": 16,  # 640 ms
         "eval_left_chunks": 4,
     },
-    "specaug": {"freq_masks": 2, "freq_width": 27, "time_masks": 10, "time_ratio": 0.05},
+    # ESPnet librispeech_100 / WeNet: 2 mặt nạ tần, 2 mặt nạ thời gian. Bản "adaptive" 10 mặt nạ
+    # (Park et al. 2020) dành cho dữ liệu hàng nghìn giờ; với ~100 giờ nó làm model khó thoát plateau.
+    "specaug": {"freq_masks": 2, "freq_width": 27, "time_masks": 2, "time_ratio": 0.05, "time_width_max": 40},
 }
 
 
@@ -85,7 +90,7 @@ def spec_augment(x: torch.Tensor, lengths: torch.Tensor, cfg: dict) -> torch.Ten
             w = random.randint(0, cfg["freq_width"])
             s = random.randint(0, max(0, f - w))
             x[i, :, s : s + w] = fill
-        max_w = max(1, int(L * cfg["time_ratio"]))
+        max_w = max(1, min(int(L * cfg["time_ratio"]), cfg.get("time_width_max", 10**9)))
         for _ in range(cfg["time_masks"]):
             w = random.randint(0, max_w)
             s = random.randint(0, max(0, L - w))
@@ -236,22 +241,33 @@ def main(argv=None):
         sampler.set_epoch(epoch)
         t_log, loss_acc, n_acc = time.time(), 0.0, 0
         data_wait, t_fetch = 0.0, time.time()
+        blank_acc, clip_acc = 0.0, 0  # chẩn đoán: tỉ lệ blank trong argmax, số bước bị clip gradient
         for bi, (x, xl, y, yl, _) in enumerate(DataLoader(train_set, **loader_kw)):
             data_wait += time.time() - t_fetch  # thời gian GPU ngồi chờ batch: lớn nghĩa là nghẽn I/O / CPU
             x, xl, y, yl = x.to(device, non_blocking=True), xl.to(device), y.to(device), yl.to(device)
             x = spec_augment(x, xl, cfg["specaug"])
-            if random.random() < s["full_context_prob"]:
+            if step < s["start_step"] or random.random() < s["full_context_prob"]:
                 chunk, left = 0, -1
             else:
                 chunk = random.randint(1, s["max_chunk"])
-                left = random.choice([-1, random.randint(0, s["max_left_chunks"])])
+                left = random.choice([-1, random.randint(s["min_left_chunks"], s["max_left_chunks"])])
             accumulating = (bi + 1) % tc["grad_accum"] != 0
             sync_ctx = train_model.no_sync() if ddp and accumulating else contextlib.nullcontext()
             with sync_ctx:
                 with torch.autocast(device.type, dtype=torch.float16, enabled=use_amp):
-                    logits, ol = train_model(x, xl, chunk=chunk, left_chunks=left)
-                lp = logits.float().log_softmax(-1)
-                loss = F.ctc_loss(lp.transpose(0, 1), y, ol, yl, blank=0, reduction="sum", zero_infinity=True) / x.shape[0]
+                    logits, ol, inter = train_model(x, xl, chunk=chunk, left_chunks=left, return_inter=True)
+
+                def ctc(lg):
+                    lp_ = lg.float().log_softmax(-1)
+                    return F.ctc_loss(lp_.transpose(0, 1), y, ol, yl, blank=0, reduction="sum", zero_infinity=True) / x.shape[0]
+
+                loss = ctc(logits)
+                with torch.no_grad():  # model kẹt ở plateau CTC thì argmax gần như toàn blank (~1.0)
+                    valid = torch.arange(logits.shape[1], device=device)[None] < ol[:, None]
+                    blank_acc += ((logits.argmax(-1) == 0) & valid).sum().item() / max(1, valid.sum().item())
+                if inter:  # InterCTC (Lee & Watanabe 2021): giám sát thêm lớp giữa, model sâu hội tụ nhanh hơn
+                    w_i = tc["inter_ctc_weight"]
+                    loss = (1 - w_i) * loss + w_i * sum(ctc(lg) for lg in inter) / len(inter)
                 scaler.scale(loss / tc["grad_accum"]).backward()
             loss_acc += loss.item()
             n_acc += 1
@@ -262,6 +278,7 @@ def main(argv=None):
                 g["lr"] = lr_at(step, tc)
             scaler.unscale_(opt)
             gnorm = torch.nn.utils.clip_grad_norm_(model.parameters(), tc["grad_clip"])
+            clip_acc += int(float(gnorm) > tc["grad_clip"])
             scaler.step(opt)
             scaler.update()
             opt.zero_grad(set_to_none=True)
@@ -270,11 +287,12 @@ def main(argv=None):
             if step % tc["log_every"] == 0 and is_main:
                 rec = {"step": step, "epoch": epoch, "loss": loss_acc / n_acc, "lr": lr_at(step, tc), "gnorm": float(gnorm),
                        "sec_per_step": (time.time() - t_log) / tc["log_every"], "data_wait_per_step": data_wait / tc["log_every"],
-                       "frames_per_batch": int(xl.sum()), "elapsed_h": (time.time() - t_start) / 3600}
+                       "frames_per_batch": int(xl.sum()),
+                       "blank_ratio": round(blank_acc / max(1, n_acc), 3), "clipped_frac": round(clip_acc / tc["log_every"], 2), "elapsed_h": (time.time() - t_start) / 3600}
                 print(json.dumps(rec), flush=True)
                 with open(log_path, "a") as f:
                     f.write(json.dumps(rec) + "\n")
-                t_log, loss_acc, n_acc, data_wait = time.time(), 0.0, 0, 0.0
+                t_log, loss_acc, n_acc, data_wait, blank_acc, clip_acc = time.time(), 0.0, 0, 0.0, 0.0, 0
 
             if step % tc["eval_every"] == 0 and len(dev_set) and is_main:
                 res = evaluate(model, dev_set, cfg, device, vocab)

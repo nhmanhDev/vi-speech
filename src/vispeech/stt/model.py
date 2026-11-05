@@ -34,6 +34,7 @@ class ConformerConfig:
     conv_kernel: int = 15
     dropout: float = 0.1
     subsampling_channels: int = 256
+    inter_ctc_layers: tuple = ()  # InterCTC: thêm CTC phụ ở các lớp giữa (vd (6,)), dùng chung head
 
 
 # ---------------------------------------------------------------- building blocks
@@ -214,15 +215,23 @@ class ConformerCTC(nn.Module):
         self.mean.copy_(torch.as_tensor(mean, dtype=torch.float32))
         self.std.copy_(torch.as_tensor(std, dtype=torch.float32).clamp_min(1e-5))
 
-    def forward(self, feats: torch.Tensor, lengths: torch.Tensor, chunk: int = 0, left_chunks: int = -1):
-        """feats (B, T, n_mels) log-mel -> logits (B, T', V), lengths (B,)."""
+    def forward(self, feats: torch.Tensor, lengths: torch.Tensor, chunk: int = 0, left_chunks: int = -1, return_inter: bool = False):
+        """feats (B, T, n_mels) log-mel -> logits (B, T', V), lengths (B,).
+
+        return_inter=True: trả thêm danh sách logits ở các lớp `inter_ctc_layers` (cho InterCTC).
+        """
         x = self.drop(self.subsample((feats - self.mean) / self.std))
         lengths = subsampled_lengths(lengths).clamp(min=0, max=x.shape[1])
         t = x.shape[1]
         pad_mask = torch.arange(t, device=x.device)[None, :] < lengths[:, None]  # (B, T)
         att_mask = chunk_mask(t, chunk, left_chunks, x.device)[None, None] & pad_mask[:, None, None, :]
-        for blk in self.blocks:
+        inter = []
+        for i, blk in enumerate(self.blocks, 1):
             x = blk(x, att_mask, pad_mask)
+            if return_inter and i in self.cfg.inter_ctc_layers:
+                inter.append(self.head(x))
+        if return_inter:
+            return self.head(x), lengths, inter
         return self.head(x), lengths
 
     # ------------------------------------------------------------ streaming
