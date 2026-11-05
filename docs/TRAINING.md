@@ -39,14 +39,33 @@ Lệnh điều khiển: `scripts/kaggle_job.py` (`push-code`, `prep`, `tts-prep`
 Thay đổi chung so với lượt 1: LR 1e-3; SpecAugment 2+2 mặt nạ (mặt nạ thời gian ≤ 40 frame); 4.000 bước đầu chỉ
 full context rồi mới bật chunk (curriculum); left_chunks ≥ 1. Thêm log `blank_ratio`, `clipped_frac`.
 
-| Cấu hình | Khác biệt | CER dev @1.000 |
-|---|---|---|
-| B (`configs/exp/stt_b.yaml`) | + InterCTC lớp 6 (trọng số 0,3) | 0,743 |
-| C (`configs/exp/stt_c.yaml`) | không InterCTC | 0,753 |
+Kết quả sau 2 giờ (1 GPU / cấu hình, batch 40.000 frame, dev 696 câu):
 
-Cả hai ở bước 1.000 đã tốt hơn lượt 1 ở bước 2.000 (0,83). Kết quả đầy đủ cập nhật khi xong.
+| Bước | B offline CER / WER | B streaming 640 ms CER / WER | C offline CER / WER | C streaming CER / WER |
+|---|---|---|---|---|
+| 1.000 | 0,743 / 0,997 | 0,775 / 0,995 | 0,753 / 1,000 | 0,767 / 0,995 |
+| 4.000 | 0,286 / 0,527 | 0,445 / 0,753 | 0,318 / 0,583 | 0,431 / 0,769 |
+| 8.000 | 0,179 / 0,333 | 0,199 / 0,373 | 0,187 / 0,354 | 0,208 / 0,393 |
+| 12.000 | 0,140 / 0,266 | 0,157 / 0,301 | 0,152 / 0,284 | 0,167 / 0,315 |
+| cuối | **0,106 / 0,201** (17.570) | **0,126 / 0,239** | 0,123 / 0,240 (16.739) | 0,145 / 0,290 |
+
+B (InterCTC) thắng C ở mọi mốc → chọn B. Tỉ lệ blank ổn định ~0,22 (đã thoát plateau). `clipped_frac` = 1,0
+(gradient luôn bị cắt về 5 vì loss cộng theo câu), vẫn hội tụ tốt nên giữ nguyên.
 
 Lưu ý: thí nghiệm này lỡ chạy **trùng 2 bản** (bản tự động + bản đẩy tay), chiếm cả 2 suất GPU trong 2 giờ.
+
+### Lượt 2 chính thức: `stt-small-v2` (configs/stt_small_v2.yaml = cấu hình B), từ 2026-11-05 ~10:15 UTC
+
+- Khởi tạo từ checkpoint B ở bước 17.570 (`--init-kernel nhmanhaidev/vi-speech-exp-plateau --init-run stt_b`),
+  DDP 2× T4, thêm EMA (decay 0,9999), 11 giờ.
+
+| Bước | Offline CER / WER | Streaming CER / WER | Streaming + EMA CER / WER |
+|---|---|---|---|
+| 26.000 | 0,087 / 0,164 | 0,108 / 0,201 | 0,091 / 0,170 |
+| 28.000 | 0,080 / 0,151 | 0,102 / 0,192 | 0,085 / 0,161 |
+| 30.000 | 0,079 / 0,146 | 0,098 / 0,181 | 0,086 / 0,161 |
+
+EMA giảm WER streaming ~2 điểm. Dev có lẫn InfoRe (1 giọng, dễ) nên con số chính thức sẽ đo trên FLEURS-vi và VIVOS.
 
 ## TTS
 
@@ -58,8 +77,20 @@ Lưu ý: thí nghiệm này lỡ chạy **trùng 2 bản** (bản tự động +
 ### Lượt 2: `tts-matcha` với điều khiển ngữ điệu (configs/tts_matcha_prosody.yaml)
 
 - Thêm vector ngữ điệu 3 chiều (cao độ, biên độ cao độ, tốc độ), dropout điều kiện 0,2.
-- Phiên 4 giờ, resume nối tiếp; mỗi 3.000 bước lưu mẫu giọng 3 câu × 3 kiểu (bình thường / hào hứng / trầm).
-- Trạng thái: chờ suất GPU (tự chạy khi thí nghiệm STT xong).
+- Phiên 4 giờ, resume nối tiếp (tự tham chiếu output phiên trước: đã kiểm, phiên 2 resume đúng từ bước 26.603).
+- Mỗi 3.000 bước lưu mẫu 3 câu × 3 kiểu (bình thường / hào hứng / trầm). Câu mẫu không có trong dữ liệu train.
+
+Phiên 1 (07:37–11:40 UTC, 26.600 bước, 0,53 s/bước): loss cuối dur 0,39; prior 1,01; flow matching 0,36.
+Chấm mẫu bằng PhoWhisper-small (3 câu, nên số dao động):
+
+| Bước | CER (bình thường) |
+|---|---|
+| 3.000 | 0,388 |
+| 12.000 | 0,123 |
+| 24.000 | 0,150 (hào hứng 0,081; trầm 0,084) |
+
+Điều khiển ngữ điệu có tác dụng đo được ở bước 24.000: cao độ trung vị bình thường 14,3 / hào hứng 15,7 /
+trầm 12,9 semitone (±1,4 st), tổng thời lượng 18,2 / 17,1 / 19,3 s (±6%).
 
 ## Chạy thử trên CPU (không phải train thật)
 
