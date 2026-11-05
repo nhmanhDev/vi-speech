@@ -11,6 +11,7 @@ Thiết kế để chạy được trên Kaggle (giới hạn 12 giờ / phiên)
 from __future__ import annotations
 
 import argparse
+import contextlib
 import glob
 import json
 import math
@@ -19,7 +20,9 @@ import random
 import time
 
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
+from torch.nn.parallel import DistributedDataParallel as DDP
 import yaml
 from torch.utils.data import DataLoader
 
@@ -151,10 +154,29 @@ def main(argv=None):
     t_start = time.time()
     cfg = load_config(args.config)
     tc = cfg["train"]
-    random.seed(tc["seed"])
-    torch.manual_seed(tc["seed"])
+    # Multi-GPU: chạy bằng `torchrun --nproc_per_node=N`, torchrun đặt RANK/WORLD_SIZE/LOCAL_RANK.
+    world = int(os.environ.get("WORLD_SIZE", "1"))
+    rank = int(os.environ.get("RANK", "0"))
+    ddp = world > 1
+    if ddp:
+        local = int(os.environ["LOCAL_RANK"])
+        if torch.cuda.is_available():
+            dist.init_process_group("nccl")
+            torch.cuda.set_device(local)
+            device = torch.device("cuda", local)
+        else:  # gloo: để test DDP trên CPU
+            dist.init_process_group("gloo")
+            device = torch.device("cpu")
+    else:
+        device = torch.device(args.device)
+    is_main = rank == 0
+    if not is_main:
+        import builtins
+
+        builtins.print = lambda *a, **k: None  # chỉ rank 0 in log
+    random.seed(tc["seed"] + rank)  # SpecAugment / chunk khác nhau giữa các GPU
+    torch.manual_seed(tc["seed"])  # nhưng khởi tạo model giống nhau
     os.makedirs(args.out, exist_ok=True)
-    device = torch.device(args.device)
     vocab = Vocab()
 
     train_set = MelDataset(args.data, "train", tc["dev_percent"], tc["max_utt_frames"])
@@ -182,11 +204,16 @@ def main(argv=None):
         step, epoch, best_wer = ck["step"], ck["epoch"], ck.get("best_wer", best_wer)
         print(f"resumed from {ckpt_path} at step {step}, epoch {epoch}")
 
+    train_model = DDP(model, device_ids=[device.index] if device.type == "cuda" else None) if ddp else model
+
     def checkpoint(name="last.pt"):
+        if not is_main:
+            return
         save(os.path.join(args.out, name), model=model.state_dict(), opt=opt.state_dict(), scaler=scaler.state_dict(),
              step=step, epoch=epoch, best_wer=best_wer, model_config=vars(mcfg), config=cfg)
 
-    sampler = DynamicBatchSampler([train_set.frames(i) for i in range(len(train_set))], tc["max_batch_frames"], seed=tc["seed"])
+    sampler = DynamicBatchSampler([train_set.frames(i) for i in range(len(train_set))], tc["max_batch_frames"], seed=tc["seed"],
+                                  rank=rank, world_size=world)
     loader_kw = dict(batch_sampler=sampler, collate_fn=collate, num_workers=tc["num_workers"], pin_memory=use_amp)
     if tc["num_workers"] > 0:
         loader_kw["persistent_workers"] = False
@@ -206,14 +233,17 @@ def main(argv=None):
             else:
                 chunk = random.randint(1, s["max_chunk"])
                 left = random.choice([-1, random.randint(0, s["max_left_chunks"])])
-            with torch.autocast(device.type, dtype=torch.float16, enabled=use_amp):
-                logits, ol = model(x, xl, chunk=chunk, left_chunks=left)
-            lp = logits.float().log_softmax(-1)
-            loss = F.ctc_loss(lp.transpose(0, 1), y, ol, yl, blank=0, reduction="sum", zero_infinity=True) / x.shape[0]
-            scaler.scale(loss / tc["grad_accum"]).backward()
+            accumulating = (bi + 1) % tc["grad_accum"] != 0
+            sync_ctx = train_model.no_sync() if ddp and accumulating else contextlib.nullcontext()
+            with sync_ctx:
+                with torch.autocast(device.type, dtype=torch.float16, enabled=use_amp):
+                    logits, ol = train_model(x, xl, chunk=chunk, left_chunks=left)
+                lp = logits.float().log_softmax(-1)
+                loss = F.ctc_loss(lp.transpose(0, 1), y, ol, yl, blank=0, reduction="sum", zero_infinity=True) / x.shape[0]
+                scaler.scale(loss / tc["grad_accum"]).backward()
             loss_acc += loss.item()
             n_acc += 1
-            if (bi + 1) % tc["grad_accum"]:
+            if accumulating:
                 continue
 
             for g in opt.param_groups:
@@ -225,7 +255,7 @@ def main(argv=None):
             opt.zero_grad(set_to_none=True)
             step += 1
 
-            if step % tc["log_every"] == 0:
+            if step % tc["log_every"] == 0 and is_main:
                 rec = {"step": step, "epoch": epoch, "loss": loss_acc / n_acc, "lr": lr_at(step, tc), "gnorm": float(gnorm),
                        "sec_per_step": (time.time() - t_log) / tc["log_every"], "elapsed_h": (time.time() - t_start) / 3600}
                 print(json.dumps(rec), flush=True)
@@ -233,7 +263,7 @@ def main(argv=None):
                     f.write(json.dumps(rec) + "\n")
                 t_log, loss_acc, n_acc = time.time(), 0.0, 0
 
-            if step % tc["eval_every"] == 0 and len(dev_set):
+            if step % tc["eval_every"] == 0 and len(dev_set) and is_main:
                 res = evaluate(model, dev_set, cfg, device, vocab)
                 print(json.dumps({"step": step, "eval": res}), flush=True)
                 with open(log_path, "a") as f:
@@ -244,6 +274,10 @@ def main(argv=None):
 
             out_of_time = args.max_hours and (time.time() - t_start) / 3600 > args.max_hours
             out_of_steps = (args.max_steps and step >= args.max_steps) or step >= tc["total_steps"]
+            if ddp:  # mọi GPU phải dừng cùng một bước, theo quyết định của rank 0
+                flag = torch.tensor([int(bool(out_of_time)), int(bool(out_of_steps))], device=device)
+                dist.broadcast(flag, 0)
+                out_of_time, out_of_steps = bool(flag[0]), bool(flag[1])
             if time.time() - last_save > tc["save_every_min"] * 60 or out_of_time or out_of_steps:
                 checkpoint()
                 last_save = time.time()
@@ -253,7 +287,10 @@ def main(argv=None):
                 break
         else:
             epoch += 1
-    if len(dev_set):
+    if ddp:
+        dist.barrier()
+        dist.destroy_process_group()
+    if len(dev_set) and is_main:
         res = evaluate(model, dev_set, cfg, device, vocab)
         print(json.dumps({"step": step, "final_eval": res}), flush=True)
         with open(log_path, "a") as f:

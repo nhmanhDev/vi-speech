@@ -68,6 +68,16 @@ sh(f"python -m vispeech.data.prepare --parquet '{{d}}/data/*.parquet' --out /kag
 sh("rm -rf /tmp/hf")
 '''
 
+TTS_PREP = BOOTSTRAP + r'''
+subprocess.run([sys.executable, "-m", "pip", "install", "-q", "pyloudnorm", "silero-vad", "transformers"], check=False)
+from huggingface_hub import snapshot_download
+d = snapshot_download("{hf}", repo_type="dataset", allow_patterns=["data/*.parquet"], local_dir="/tmp/hf/{name}")
+out = "/kaggle/working/tts/{name}"
+sh(f"python -m vispeech.tts.prepare --parquet '{{d}}/data/*.parquet' --out {{out}} --speaker {name} --workers 4 {extra}")
+sh("rm -rf /tmp/hf")
+sh(f"python -m vispeech.tts.asr_filter --data {{out}} --model {asr} --batch 24")
+'''
+
 TRAIN = BOOTSTRAP + r'''
 sh("nvidia-smi")
 data = sorted(glob.glob("/kaggle/input/**/prep/*/meta.json", recursive=True))
@@ -75,7 +85,9 @@ data = " ".join(os.path.dirname(p) for p in data)
 print("data:", data)
 resume = " ".join(glob.glob("/kaggle/input/**/runs/{run}", recursive=True))
 sh(f"cp -r {{resume}} /kaggle/working/runs_prev || true") if resume else None
-sh(f"python -m vispeech.stt.train --config {{ROOT}}/{config} --data {{data}} --out /kaggle/working/runs/{run} "
+import torch
+ngpu = max(1, torch.cuda.device_count())
+sh(f"torchrun --standalone --nproc_per_node={{ngpu}} -m vispeech.stt.train --config {{ROOT}}/{config} --data {{data}} --out /kaggle/working/runs/{run} "
    f"--resume /kaggle/working/runs_prev --max-hours {max_hours}")
 sh("rm -rf /kaggle/working/runs_prev")
 '''
@@ -124,6 +136,14 @@ def cmd_prep(args):
                 datasets=[f"{user}/{CODE_SLUG}"], kernels=[])
 
 
+def cmd_tts_prep(args):
+    user = username()
+    extra = f"--limit-files {args.limit_files}" if args.limit_files else ""
+    code = TTS_PREP.format(hf=args.hf, name=args.name, extra=extra, asr=args.asr)
+    push_kernel(f"{user}/vi-speech-tts-prep-{args.name}", f"vi-speech-tts-prep-{args.name}", code, gpu=True,
+                datasets=[f"{user}/{CODE_SLUG}"], kernels=[])
+
+
 def cmd_train(args):
     user = username()
     slug = f"{user}/vi-speech-train-{args.run}"
@@ -143,6 +163,11 @@ def main():
     p.add_argument("--hf", required=True)
     p.add_argument("--name", required=True)
     p.add_argument("--limit-files", type=int, default=0)
+    p = sub.add_parser("tts-prep")
+    p.add_argument("--hf", required=True)
+    p.add_argument("--name", required=True)
+    p.add_argument("--asr", default="vinai/PhoWhisper-medium")
+    p.add_argument("--limit-files", type=int, default=0)
     p = sub.add_parser("train")
     p.add_argument("--prep", nargs="+", required=True)
     p.add_argument("--config", default="configs/stt_small.yaml")
@@ -160,6 +185,8 @@ def main():
         cmd_push_code(args)
     elif args.cmd == "prep":
         cmd_prep(args)
+    elif args.cmd == "tts-prep":
+        cmd_tts_prep(args)
     elif args.cmd == "train":
         cmd_train(args)
     elif args.cmd == "status":
