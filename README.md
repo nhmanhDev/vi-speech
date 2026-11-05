@@ -7,6 +7,15 @@ Nhận dạng giọng nói (STT) và tổng hợp giọng nói (TTS) tiếng Vi�
 > (dữ liệu → train → ONNX → CPU). Đang train trên Kaggle (2× T4). Voice Agent: xem [docs/ROADMAP.md](docs/ROADMAP.md).
 > Dữ liệu và các quyết định xử lý: [docs/DATA.md](docs/DATA.md).
 
+## Tài liệu
+
+| File | Nội dung |
+|---|---|
+| [docs/DATA.md](docs/DATA.md) | Dùng bộ dữ liệu nào, lấy ở đâu, từng bước xử lý và lý do, còn lại bao nhiêu sau mỗi bước |
+| [docs/TRAINING.md](docs/TRAINING.md) | Nhật ký mọi lượt train trên GPU: cấu hình, kết quả, vì sao dừng, giới hạn Kaggle |
+| [docs/AGENT.md](docs/AGENT.md) | Voice agent: kiến trúc, độ trễ đo được, barge-in, quyết định thiết kế |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Việc đã xong / sắp làm |
+
 ## Kiến trúc STT
 
 ```
@@ -55,10 +64,13 @@ RTF int8 ~0,35 trên i5 gen 12.)*
 
 ## Dữ liệu
 
-| Dataset | Giờ | License | Dùng cho |
+| Dataset | Dùng cho | Sau xử lý | License |
 |---|---|---|---|
-| [doof-ferb/vlsp2020_vinai_100h](https://huggingface.co/datasets/doof-ferb/vlsp2020_vinai_100h) | ~100 | CC-BY-4.0 | STT |
-| [doof-ferb/infore1_25hours](https://huggingface.co/datasets/doof-ferb/infore1_25hours) | 25 (1 giọng, 44,1 kHz) | CC-BY-4.0 | TTS, STT |
+| [doof-ferb/vlsp2020_vinai_100h](https://huggingface.co/datasets/doof-ferb/vlsp2020_vinai_100h) | STT | 54.497 câu, 92,2 h | CC-BY-4.0 |
+| [doof-ferb/infore1_25hours](https://huggingface.co/datasets/doof-ferb/infore1_25hours) | STT, TTS (1 giọng nữ) | STT 24,9 h; TTS 13.044 câu ≈ 20,7 h | CC-BY-4.0 |
+| FLEURS-vi test, VIVOS test | chỉ đánh giá STT | 857 + 760 câu | CC-BY-4.0 / CC-BY-NC-SA-4.0 |
+
+Chi tiết từng bước xử lý: [docs/DATA.md](docs/DATA.md).
 
 Pipeline TTS: VAD cắt im lặng → -20 LUFS → 24 kHz → mel khớp Vocos → SNR (theo VAD) → kiểm nhãn bằng PhoWhisper (CER ≤ 5%).
 
