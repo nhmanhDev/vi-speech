@@ -80,8 +80,15 @@ sh(f"python -m vispeech.tts.asr_filter --data {{out}} --model {asr} --batch 24")
 
 TRAIN = BOOTSTRAP + r'''
 sh("nvidia-smi")
-data = sorted(glob.glob("/kaggle/input/**/prep/*/meta.json", recursive=True))
-data = " ".join(os.path.dirname(p) for p in data)
+# /kaggle/input là ổ mạng: đọc ngẫu nhiên memmap rất chậm (đo được ~6 s/bước).
+# Copy tuần tự sang ổ local /tmp trước (vài phút) rồi mới train.
+srcs = [os.path.dirname(p) for p in sorted(glob.glob("/kaggle/input/**/prep/*/meta.json", recursive=True))]
+dsts = []
+for s_ in srcs:
+    d_ = "/tmp/prep/" + os.path.basename(s_)
+    sh(f"mkdir -p /tmp/prep && cp -r {{s_}} {{d_}}")
+    dsts.append(d_)
+data = " ".join(dsts)
 print("data:", data)
 resume = " ".join(glob.glob("/kaggle/input/**/runs/{run}", recursive=True))
 sh(f"cp -r {{resume}} /kaggle/working/runs_prev || true") if resume else None

@@ -225,7 +225,9 @@ def main(argv=None):
     while not done:
         sampler.set_epoch(epoch)
         t_log, loss_acc, n_acc = time.time(), 0.0, 0
+        data_wait, t_fetch = 0.0, time.time()
         for bi, (x, xl, y, yl, _) in enumerate(DataLoader(train_set, **loader_kw)):
+            data_wait += time.time() - t_fetch  # thời gian GPU ngồi chờ batch: lớn nghĩa là nghẽn I/O / CPU
             x, xl, y, yl = x.to(device, non_blocking=True), xl.to(device), y.to(device), yl.to(device)
             x = spec_augment(x, xl, cfg["specaug"])
             if random.random() < s["full_context_prob"]:
@@ -257,11 +259,12 @@ def main(argv=None):
 
             if step % tc["log_every"] == 0 and is_main:
                 rec = {"step": step, "epoch": epoch, "loss": loss_acc / n_acc, "lr": lr_at(step, tc), "gnorm": float(gnorm),
-                       "sec_per_step": (time.time() - t_log) / tc["log_every"], "elapsed_h": (time.time() - t_start) / 3600}
+                       "sec_per_step": (time.time() - t_log) / tc["log_every"], "data_wait_per_step": data_wait / tc["log_every"],
+                       "frames_per_batch": int(xl.sum()), "elapsed_h": (time.time() - t_start) / 3600}
                 print(json.dumps(rec), flush=True)
                 with open(log_path, "a") as f:
                     f.write(json.dumps(rec) + "\n")
-                t_log, loss_acc, n_acc = time.time(), 0.0, 0
+                t_log, loss_acc, n_acc, data_wait = time.time(), 0.0, 0, 0.0
 
             if step % tc["eval_every"] == 0 and len(dev_set) and is_main:
                 res = evaluate(model, dev_set, cfg, device, vocab)
@@ -281,6 +284,7 @@ def main(argv=None):
             if time.time() - last_save > tc["save_every_min"] * 60 or out_of_time or out_of_steps:
                 checkpoint()
                 last_save = time.time()
+            t_fetch = time.time()
             if out_of_time or out_of_steps:
                 print(f"stopping at step {step} ({'time' if out_of_time else 'steps'})")
                 done = True
