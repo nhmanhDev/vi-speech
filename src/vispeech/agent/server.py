@@ -8,7 +8,8 @@ Giao thức (1 kết nối = 1 phiên):
                       text JSON: partial | final | agent_text | interrupt | agent_done | vad | metrics
 Khi nhận "interrupt", client phải xoá ngay hàng đợi phát audio (đó là barge-in phía client).
 
-Mở web/agent.html trong trình duyệt để nói chuyện bằng micro.
+Mở http://localhost:8765 trong trình duyệt để nói chuyện bằng micro (server phục vụ luôn web/agent.html
+trên cùng cổng; mở file trực tiếp bằng file:// sẽ không chạy vì trình duyệt chặn AudioWorklet).
 Vì sao WebSocket chứ không WebRTC: đơn giản, đủ cho demo/LAN. Sản phẩm qua Internet / tổng đài
 nên dùng WebRTC (UDP, jitter buffer, AEC chuẩn) hoặc SIP; xem docs/AGENT.md.
 """
@@ -52,8 +53,22 @@ async def serve(args):
         finally:
             await session._cancel_response()
 
-    async with websockets.serve(handler, args.host, args.port, max_size=2**22):
-        print(f"voice agent: ws://{args.host}:{args.port}  (web client: {os.path.join('web', 'agent.html')})", flush=True)
+    html_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "web", "agent.html")
+
+    def process_request(connection, request):
+        # Yêu cầu HTTP thường (không phải WebSocket upgrade) -> trả trang web client
+        if request.headers.get("Upgrade", "").lower() != "websocket":
+            with open(html_path, "rb") as f:
+                body = f.read()
+            from websockets.datastructures import Headers
+            from websockets.http11 import Response
+
+            headers = Headers([("Content-Type", "text/html; charset=utf-8"), ("Content-Length", str(len(body)))])
+            return Response(200, "OK", headers, body)
+        return None
+
+    async with websockets.serve(handler, args.host, args.port, max_size=2**22, process_request=process_request):
+        print(f"voice agent: http://localhost:{args.port}  (WebSocket cùng cổng)", flush=True)
         await asyncio.Future()
 
 

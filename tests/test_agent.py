@@ -116,3 +116,10 @@ def test_split_sentences():
     out, rest = split_sentences("Xin chào anh. Hôm nay trời đẹp quá, anh có muốn đi")
     assert out == ["Xin chào anh."] and rest.startswith(" Hôm nay")
     json.dumps(out)
+
+
+def test_first_chunk_split_early():
+    out, rest = split_sentences("Bạn vừa nói: xin chào anh", first=True)
+    assert out == ["Bạn vừa nói:"]
+    out, _ = split_sentences("Bạn vừa nói: xin chào anh", first=False)
+    assert out == []

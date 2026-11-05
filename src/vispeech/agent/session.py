@@ -156,7 +156,7 @@ class VoiceAgentSession:
             async for tok in self.llm.stream(self.history[-self.cfg.max_history :]):
                 m.mark("llm_first")
                 buf += tok
-                sentences, buf = split_sentences(buf)
+                sentences, buf = split_sentences(buf, first=not spoken)
                 for s in sentences:
                     clock = await self._speak(s, m, clock)
                     spoken.append(s)

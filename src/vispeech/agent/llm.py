@@ -52,16 +52,19 @@ class OpenAICompatLLM:
                         yield delta
 
 
-def split_sentences(buffer: str, min_chars: int = 12) -> tuple[list[str], str]:
-    """Cắt câu hoàn chỉnh từ buffer token để đưa TTS sớm (không chờ LLM sinh xong).
+def split_sentences(buffer: str, first: bool = False, min_chars: int = 12) -> tuple[list[str], str]:
+    """Cắt đoạn hoàn chỉnh từ buffer token để đưa TTS sớm (không chờ LLM sinh xong).
 
-    Câu đầu tiên quyết định độ trễ cảm nhận, nên cho phép cắt cả ở dấu phẩy khi đã đủ dài.
+    Độ trễ cảm nhận do đoạn *đầu tiên* quyết định, nên với đoạn đầu (`first=True`) cho cắt ngay ở
+    dấu phẩy / hai chấm khi đã có >= 8 ký tự. Các đoạn sau ưu tiên câu trọn (ngữ điệu tự nhiên hơn),
+    chỉ cắt ở dấu phẩy khi câu đã dài (>= 40 ký tự).
     """
     out, start = [], 0
     for i, ch in enumerate(buffer):
-        if ch in ".?!\n" or (ch in ",;:" and i - start >= 40):
+        soft_min = 8 if first and not out else 40
+        if ch in ".?!\n" or (ch in ",;:" and i - start >= soft_min):
             piece = buffer[start : i + 1].strip()
-            if len(piece) >= min_chars or ch in ".?!":
+            if len(piece) >= min_chars or ch in ".?!\n" or (first and not out and len(piece) >= 8):
                 if piece:
                     out.append(piece)
                 start = i + 1

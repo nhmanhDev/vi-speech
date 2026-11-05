@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vi-speech voice agent</title>
+<style>
+  :root { --bg:#fafaf9; --fg:#1c1917; --muted:#78716c; --card:#fff; --line:#e7e5e4; --accent:#0f766e; --warn:#b45309; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1c1917; --fg:#f5f5f4; --muted:#a8a29e; --card:#292524; --line:#44403c; --accent:#2dd4bf; --warn:#fbbf24; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:16px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width:720px; margin:0 auto; padding:24px 16px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p.sub { color:var(--muted); margin:0 0 16px; font-size:14px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  input { flex:1; min-width:200px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--fg); }
+  button { padding:8px 16px; border:0; border-radius:8px; background:var(--accent); color:#fff; font-weight:600; cursor:pointer; }
+  button.stop { background:var(--warn); }
+  #state { font-size:14px; color:var(--muted); }
+  #dot { display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--line); margin-right:6px; vertical-align:middle; }
+  #dot.on { background:var(--accent); }
+  #log { margin-top:16px; display:flex; flex-direction:column; gap:8px; }
+  .msg { padding:10px 12px; border-radius:10px; background:var(--card); border:1px solid var(--line); }
+  .user { align-self:flex-end; max-width:85%; }
+  .agent { align-self:flex-start; max-width:85%; }
+  .partial { color:var(--muted); font-style:italic; }
+  .meta { font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; }
+</style>
+</head>
+<body>
+<main>
+  <h1>vi-speech voice agent</h1>
+  <p class="sub">Nói tiếng Việt vào micro. Có thể nói chen để ngắt lời agent (barge-in). Nên đeo tai nghe.</p>
+  <div class="row">
+    <input id="url" value="" aria-label="Địa chỉ server">
+    <button id="btn">Bắt đầu</button>
+  </div>
+  <p id="state"><span id="dot"></span><span id="stateText">Chưa kết nối</span></p>
+  <div id="log"></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+$('url').value = location.protocol.startsWith('http') ? `ws://${location.host}` : 'ws://localhost:8765';
+let ws, micCtx, playCtx, stream, node, playHead = 0, sources = [], partialEl = null, agentEl = null;
+
+// AudioWorklet: gom mẫu micro (đã ở 16 kHz) thành khối 20 ms (320 mẫu) và gửi về luồng chính
+const workletSrc = `
+class Cap extends AudioWorkletProcessor {
+  constructor() { super(); this.buf = new Float32Array(320); this.n = 0; }
+  process(inputs) {
+    const ch = inputs[0][0]; if (!ch) return true;
+    for (let i = 0; i < ch.length; i++) {
+      this.buf[this.n++] = ch[i];
+      if (this.n === 320) { this.port.postMessage(this.buf.slice()); this.n = 0; }
+    }
+    return true;
+  }
+}
+registerProcessor('cap', Cap);`;
+
+function setState(t, on) { $('stateText').textContent = t; $('dot').classList.toggle('on', !!on); }
+function add(cls, text) { const d = document.createElement('div'); d.className = 'msg ' + cls; d.textContent = text; $('log').prepend(d); return d; }
+
+function playPcm(buf) {
+  const pcm = new Int16Array(buf), f = new Float32Array(pcm.length);
+  for (let i = 0; i < pcm.length; i++) f[i] = pcm[i] / 32768;
+  const ab = playCtx.createBuffer(1, f.length, 24000); ab.copyToChannel(f, 0);
+  const src = playCtx.createBufferSource(); src.buffer = ab; src.connect(playCtx.destination);
+  playHead = Math.max(playHead, playCtx.currentTime + 0.05);
+  src.start(playHead); playHead += ab.duration;
+  sources.push(src); src.onended = () => { sources = sources.filter(s => s !== src); };
+}
+function flushPlayback() { sources.forEach(s => { try { s.stop(); } catch (e) {} }); sources = []; playHead = 0; }
+
+async function start() {
+  stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+  micCtx = new AudioContext({ sampleRate: 16000 });   // trình duyệt tự resample micro về 16 kHz
+  playCtx = new AudioContext({ sampleRate: 24000 });
+  await micCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([workletSrc], { type: 'application/javascript' })));
+  node = new AudioWorkletNode(micCtx, 'cap');
+  micCtx.createMediaStreamSource(stream).connect(node);
+  ws = new WebSocket($('url').value); ws.binaryType = 'arraybuffer';
+  node.port.onmessage = e => {
+    if (ws.readyState !== 1) return;
+    const f = e.data, pcm = new Int16Array(f.length);
+    for (let i = 0; i < f.length; i++) pcm[i] = Math.max(-32768, Math.min(32767, f[i] * 32768));
+    ws.send(pcm.buffer);
+  };
+  ws.onopen = () => setState('Đã kết nối, đang nghe', true);
+  ws.onclose = () => { setState('Mất kết nối'); stop(); };
+  ws.onmessage = e => {
+    if (typeof e.data !== 'string') { playPcm(e.data); return; }
+    const m = JSON.parse(e.data);
+    if (m.type === 'partial') { partialEl = partialEl || add('user partial', ''); partialEl.textContent = m.text; }
+    else if (m.type === 'final') { if (partialEl) partialEl.remove(); partialEl = null; if (m.text) add('user', m.text); agentEl = null; }
+    else if (m.type === 'agent_text') { agentEl = agentEl || add('agent', ''); agentEl.textContent += (agentEl.textContent ? ' ' : '') + m.text; }
+    else if (m.type === 'interrupt') { flushPlayback(); if (agentEl) agentEl.textContent += ' [bị ngắt]'; agentEl = null; }
+    else if (m.type === 'vad') setState(m.speech ? 'Bạn đang nói…' : 'Đang nghe', true);
+    else if (m.type === 'metrics') {
+      const d = document.createElement('div'); d.className = 'meta';
+      d.textContent = `STT ${m.asr_final ?? '-'} ms · LLM token đầu ${m.llm_first ?? '-'} ms · audio đầu ${m.tts_first ?? '-'} ms (tính từ lúc hết lượt)`;
+      $('log').prepend(d);
+    }
+  };
+  $('btn').textContent = 'Dừng'; $('btn').classList.add('stop');
+}
+function stop() {
+  try { ws && ws.close(); } catch (e) {}
+  stream && stream.getTracks().forEach(t => t.stop());
+  micCtx && micCtx.close(); playCtx && playCtx.close(); micCtx = playCtx = null;
+  $('btn').textContent = 'Bắt đầu'; $('btn').classList.remove('stop');
+}
+$('btn').onclick = () => (micCtx ? stop() : start().catch(err => setState('Lỗi: ' + err.message)));
+</script>
+</body>
+</html>
