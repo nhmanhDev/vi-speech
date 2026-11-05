@@ -27,6 +27,7 @@ import yaml
 from torch.utils.data import DataLoader
 
 from ..data.dataset import DynamicBatchSampler, MelDataset, collate
+from ..ema import EMA
 from ..metrics import ErrorRate
 from ..text.vocab import Vocab
 from .model import ConformerConfig, ConformerCTC, count_params
@@ -43,7 +44,8 @@ DEFAULTS = {
         "grad_clip": 5.0,
         "max_utt_frames": 2000,
         "dev_percent": 1.0,
-        "inter_ctc_weight": 0.3,  # chỉ dùng khi model.inter_ctc_layers khác rỗng
+        "inter_ctc_weight": 0.3,
+        "ema_decay": 0.9999,  # 0 = tắt EMA trọng số  # chỉ dùng khi model.inter_ctc_layers khác rỗng
         "num_workers": 2,
         "log_every": 50,
         "eval_every": 2000,
@@ -209,6 +211,7 @@ def main(argv=None):
     use_amp = device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     step, epoch, best_wer = 0, 0, float("inf")
+    ema = EMA(model, tc["ema_decay"]) if tc.get("ema_decay") and is_main else None
 
     ckpt_path = find_checkpoint(args.resume + [args.out])
     if ckpt_path:
@@ -217,6 +220,8 @@ def main(argv=None):
         opt.load_state_dict(ck["opt"])
         scaler.load_state_dict(ck["scaler"])
         step, epoch, best_wer = ck["step"], ck["epoch"], ck.get("best_wer", best_wer)
+        if ema is not None and "ema" in ck:
+            ema.load_state_dict(ck["ema"])
         print(f"resumed from {ckpt_path} at step {step}, epoch {epoch}")
 
     train_model = DDP(model, device_ids=[device.index] if device.type == "cuda" else None) if ddp else model
@@ -224,8 +229,9 @@ def main(argv=None):
     def checkpoint(name="last.pt"):
         if not is_main:
             return
+        extra = {"ema": ema.state_dict(), "model_ema": ema.weights(model)} if ema is not None else {}
         save(os.path.join(args.out, name), model=model.state_dict(), opt=opt.state_dict(), scaler=scaler.state_dict(),
-             step=step, epoch=epoch, best_wer=best_wer, model_config=vars(mcfg), config=cfg)
+             step=step, epoch=epoch, best_wer=best_wer, model_config=vars(mcfg), config=cfg, **extra)
 
     sampler = DynamicBatchSampler([train_set.frames(i) for i in range(len(train_set))], tc["max_batch_frames"], seed=tc["seed"],
                                   rank=rank, world_size=world)
@@ -281,6 +287,8 @@ def main(argv=None):
             clip_acc += int(float(gnorm) > tc["grad_clip"])
             scaler.step(opt)
             scaler.update()
+            if ema is not None:
+                ema.update(model)
             opt.zero_grad(set_to_none=True)
             step += 1
 
@@ -296,11 +304,15 @@ def main(argv=None):
 
             if step % tc["eval_every"] == 0 and len(dev_set) and is_main:
                 res = evaluate(model, dev_set, cfg, device, vocab)
+                if ema is not None:  # đánh giá cả bản EMA; chọn best theo bản tốt hơn ở chế độ streaming
+                    with ema.applied(model):
+                        res["ema"] = evaluate(model, dev_set, cfg, device, vocab)
                 print(json.dumps({"step": step, "eval": res}), flush=True)
                 with open(log_path, "a") as f:
                     f.write(json.dumps({"step": step, "eval": res}) + "\n")
-                if res["stream"]["wer"] < best_wer:
-                    best_wer = res["stream"]["wer"]
+                cur = min(res["stream"]["wer"], res.get("ema", {}).get("stream", {}).get("wer", float("inf")))
+                if cur < best_wer:
+                    best_wer = cur
                     checkpoint("best.pt")
 
             out_of_time = args.max_hours and (time.time() - t_start) / 3600 > args.max_hours

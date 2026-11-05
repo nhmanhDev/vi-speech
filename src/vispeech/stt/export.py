@@ -44,10 +44,11 @@ class _Stream(nn.Module):
         return logits.log_softmax(-1), k, v, c
 
 
-def load_model(ckpt_path: str) -> ConformerCTC:
+def load_model(ckpt_path: str, use_ema: bool = True) -> ConformerCTC:
+    """Nạp checkpoint; mặc định dùng trọng số EMA nếu có (thường tốt hơn trọng số bước cuối)."""
     ck = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     model = ConformerCTC(ConformerConfig(**ck["model_config"]))
-    model.load_state_dict(ck["model"])
+    model.load_state_dict(ck["model_ema"] if use_ema and "model_ema" in ck else ck["model"])
     return model.eval()
 
 
