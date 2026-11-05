@@ -185,9 +185,19 @@ def main(argv=None):
 
     mcfg = ConformerConfig(**{**cfg["model"], "vocab_size": len(vocab)})
     model = ConformerCTC(mcfg).to(device)
-    with open(os.path.join(args.data[0], "meta.json")) as f:
-        meta = json.load(f)
-    model.set_cmvn(meta["mean"], meta["std"])
+    # CMVN gộp từ mọi thư mục dữ liệu, trọng số theo số frame (mean/var của hỗn hợp)
+    import numpy as np
+
+    metas = []
+    for d in args.data:
+        with open(os.path.join(d, "meta.json")) as f:
+            metas.append(json.load(f))
+    w = np.array([m["total_frames"] for m in metas], dtype=np.float64)
+    mu = np.array([m["mean"] for m in metas])
+    var = np.array([m["std"] for m in metas]) ** 2
+    mean = (w[:, None] * mu).sum(0) / w.sum()
+    std = np.sqrt((w[:, None] * (var + mu**2)).sum(0) / w.sum() - mean**2)
+    model.set_cmvn(mean, std)
     print(f"params={count_params(model) / 1e6:.1f}M config={mcfg}")
 
     opt = torch.optim.AdamW(model.parameters(), lr=tc["lr"], betas=(0.9, 0.98), weight_decay=tc["weight_decay"])
