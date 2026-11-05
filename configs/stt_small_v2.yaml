@@ -1,0 +1,5 @@
+# STT chính thức v2 = cấu hình B của thí nghiệm exp-plateau (thắng C ở mọi mốc): InterCTC lớp 6,
+# curriculum 4000 bước full context, SpecAugment 2+2, LR 1e-3. EMA bật mặc định trong train.py.
+model: {d_model: 256, n_heads: 4, n_layers: 12, ff_mult: 4, conv_kernel: 15, dropout: 0.1, subsampling_channels: 256, inter_ctc_layers: [6]}
+train: {lr: 1.0e-3, warmup_steps: 5000, total_steps: 150000, max_batch_frames: 40000, eval_every: 2000}
+streaming: {start_step: 4000}

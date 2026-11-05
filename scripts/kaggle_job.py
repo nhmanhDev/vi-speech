@@ -90,8 +90,12 @@ for s_ in srcs:
     dsts.append(d_)
 data = " ".join(dsts)
 print("data:", data)
-resume = " ".join(glob.glob("/kaggle/input/**/runs/{run}", recursive=True))
-sh(f"cp -r {{resume}} /kaggle/working/runs_prev || true") if resume else None
+# Checkpoint để chạy tiếp: output phiên trước của chính run này, hoặc run khởi tạo (--init-run) của kernel khác.
+# train.py chọn last.pt mới nhất trong các thư mục này.
+# Có output của chính run này thì chỉ dùng nó (cp làm mới mtime nên không được trộn với run khởi tạo).
+resume = glob.glob("/kaggle/input/**/runs/{run}", recursive=True) or (glob.glob("/kaggle/input/**/runs/{init_run}", recursive=True) if "{init_run}" else [])
+for i, r_ in enumerate(resume):
+    sh(f"mkdir -p /kaggle/working/runs_prev/{{i}} && cp -r {{r_}}/last.pt /kaggle/working/runs_prev/{{i}}/ || true")
 import torch
 ngpu = max(1, torch.cuda.device_count())
 sh(f"torchrun --standalone --nproc_per_node={{ngpu}} -m vispeech.stt.train --config {{ROOT}}/{config} --data {{data}} --out /kaggle/working/runs/{run} "
@@ -202,7 +206,9 @@ def cmd_train(args):
     kernels = [f"{user}/vi-speech-prep-{p}" for p in args.prep]
     if args.resume:
         kernels.append(slug)  # output phiên trước của chính kernel này
-    code = TRAIN.format(run=args.run, config=args.config, max_hours=args.max_hours)
+    if args.init_kernel:
+        kernels.append(args.init_kernel)  # vd thí nghiệm đã train được vài giờ: chạy tiếp thay vì train lại từ đầu
+    code = TRAIN.format(run=args.run, config=args.config, max_hours=args.max_hours, init_run=args.init_run or "")
     push_kernel(slug, f"vi-speech-train-{args.run}", code, gpu=True, datasets=[f"{user}/{CODE_SLUG}"], kernels=kernels)
 
 
@@ -241,6 +247,8 @@ def main():
     p.add_argument("--run", default="stt-small")
     p.add_argument("--max-hours", type=float, default=11.3)
     p.add_argument("--resume", action="store_true")
+    p.add_argument("--init-kernel", help="kernel có checkpoint để khởi tạo, vd nhmanhaidev/vi-speech-exp-plateau")
+    p.add_argument("--init-run", help="tên run trong output của kernel đó, vd stt_b")
     p = sub.add_parser("tts-train")
     p.add_argument("--prep", nargs="+", required=True)
     p.add_argument("--config", default="configs/tts_matcha.yaml")
