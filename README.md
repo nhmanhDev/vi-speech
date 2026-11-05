@@ -3,8 +3,9 @@
 Nhận dạng giọng nói (STT) và tổng hợp giọng nói (TTS) tiếng Việt **xây từ đầu**, ưu tiên
 **chạy realtime trên CPU / edge device**. Train trên GPU (Kaggle T4/P100), deploy bằng ONNX Runtime int8.
 
-> Trạng thái: STT streaming Conformer-CTC đã chạy đầu-cuối (dữ liệu → train → ONNX int8 → streaming
-> trên CPU). TTS và Voice Agent: đang nghiên cứu, xem [docs/ROADMAP.md](docs/ROADMAP.md).
+> Trạng thái: STT streaming Conformer-CTC và TTS Matcha-TTS + Vocos đều đã chạy đầu-cuối
+> (dữ liệu → train → ONNX → CPU). Đang train trên Kaggle (2× T4). Voice Agent: xem [docs/ROADMAP.md](docs/ROADMAP.md).
+> Dữ liệu và các quyết định xử lý: [docs/DATA.md](docs/DATA.md).
 
 ## Kiến trúc STT
 
@@ -31,12 +32,35 @@ mic 16 kHz ──► log-mel 80 (numpy, 10 ms) ──► Conv2d subsampling x4 (
 
 *(Đo bằng `vispeech.stt.bench`; WER sẽ cập nhật sau khi train trên VLSP2020.)*
 
+## Kiến trúc TTS
+
+```
+văn bản ─► chuẩn hoá (số, ngày, viết tắt) ─► ký tự + dấu câu (chèn blank)
+        ─► Text encoder (6 lớp Transformer, RoPE) ─► μ + duration predictor
+        ─► length regulator ─► Decoder U-Net 1D, flow matching (2–10 bước Euler) ─► mel 100 bin
+        ─► Vocos 24 kHz (ISTFT bằng numpy) ─► sóng âm
+```
+
+Matcha-TTS (ICASSP 2024): căn chỉnh chữ–âm tự học bằng MAS (không cần forced aligner), decoder flow matching
+nên chỉ cần vài bước suy luận. 18,5M tham số + Vocos 13,5M.
+
+| Cấu hình (CPU x86, ONNX fp32) | RTF |
+|---|---|
+| 2 luồng, 4 bước | 0,076 |
+| 2 luồng, 2 bước | 0,056 |
+| 1 luồng, 4 bước | 0,107 |
+
+*(Đo bằng `vispeech.tts.bench`, trọng số ngẫu nhiên: chỉ nói lên tốc độ. Tham khảo: VieNeu-TTS v3 Turbo tự báo
+RTF int8 ~0,35 trên i5 gen 12.)*
+
 ## Dữ liệu
 
 | Dataset | Giờ | License | Dùng cho |
 |---|---|---|---|
 | [doof-ferb/vlsp2020_vinai_100h](https://huggingface.co/datasets/doof-ferb/vlsp2020_vinai_100h) | ~100 | CC-BY-4.0 | STT |
 | [doof-ferb/infore1_25hours](https://huggingface.co/datasets/doof-ferb/infore1_25hours) | 25 (1 giọng, 44,1 kHz) | CC-BY-4.0 | TTS, STT |
+
+Pipeline TTS: VAD cắt im lặng → -20 LUFS → 24 kHz → mel khớp Vocos → SNR (theo VAD) → kiểm nhãn bằng PhoWhisper (CER ≤ 5%).
 
 ## Cách dùng
 
@@ -64,6 +88,18 @@ for pcm in mic_chunks():      # float32 16 kHz, gói 20 ms
 print(asr.finish())
 ```
 
+TTS:
+
+```bash
+python -m vispeech.tts.prepare --parquet 'data/infore/*.parquet' --out data/tts/infore --speaker infore
+python -m vispeech.tts.asr_filter --data data/tts/infore          # GPU
+python -m vispeech.tts.train --data data/tts/infore --out runs/tts_matcha
+python -m vispeech.tts.export --ckpt runs/tts_matcha/last.pt --out exported/tts_matcha
+python -m vispeech.tts.bench --model exported/tts_matcha
+```
+
+Kaggle (cần `KAGGLE_API_TOKEN`): `scripts/kaggle_job.py push-code | prep | tts-prep | train | status | output`.
+
 ## Cấu trúc
 
 ```
@@ -72,6 +108,7 @@ src/vispeech/
   audio.py   đọc audio, log-mel (offline + streaming)
   data/      tiền xử lý parquet -> memmap, dataset, dynamic batching
   stt/       model, train, export ONNX, runtime onnxruntime, benchmark
+  tts/       prepare + asr_filter (dữ liệu), Matcha-TTS, train, export ONNX + Vocos, runtime, benchmark
 configs/     stt_small / stt_tiny / stt_debug
 tests/       pytest (streaming == offline, padding, overfit, chuẩn hoá văn bản)
 ```
