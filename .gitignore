@@ -1,0 +1,21 @@
+# secrets
+.env
+.env.*
+!.env.example
+kaggle.json
+access_token
+
+# data & outputs
+data/
+runs/
+checkpoints/
+*.parquet
+*.wav
+*.pt
+build/kaggle_*/
+
+# python
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.venv/

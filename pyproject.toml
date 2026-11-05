@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vispeech"
+version = "0.1.0"
+description = "Vietnamese STT and TTS models trained from scratch"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "torch>=2.1",
+    "torchaudio>=2.1",
+    "pyarrow>=14",
+    "soundfile>=0.12",
+    "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+kaggle = ["kaggle>=1.7"]
+export = ["onnx>=1.15", "onnxruntime>=1.17"]
+
+[project.scripts]
+vispeech-train-stt = "vispeech.stt.train:main"
+vispeech-prepare = "vispeech.data.prepare:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

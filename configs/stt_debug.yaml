@@ -1,0 +1,19 @@
+# Chạy thử trên CPU vài phút để kiểm tra pipeline (không mong đợi WER tốt).
+model:
+  d_model: 96
+  n_heads: 4
+  n_layers: 4
+  subsampling_channels: 64
+  dropout: 0.0
+train:
+  lr: 2.0e-3
+  warmup_steps: 50
+  total_steps: 100000
+  max_batch_frames: 12000
+  num_workers: 0
+  log_every: 10
+  eval_every: 100
+  eval_utts: 40
+  dev_percent: 5.0
+specaug:
+  time_masks: 2
