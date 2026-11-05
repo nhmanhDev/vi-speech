@@ -101,6 +101,7 @@ sh("rm -rf /kaggle/working/runs_prev")
 
 
 TTS_TRAIN = BOOTSTRAP + r'''
+subprocess.run([sys.executable, "-m", "pip", "install", "-q", "vocos"], check=False)  # để lưu mẫu giọng mỗi lượt đánh giá
 srcs = [os.path.dirname(p) for p in sorted(glob.glob("/kaggle/input/**/tts/*/meta.json", recursive=True))]
 dsts = []
 for s_ in srcs:  # copy sang ổ local (ổ /kaggle/input đọc ngẫu nhiên rất chậm)

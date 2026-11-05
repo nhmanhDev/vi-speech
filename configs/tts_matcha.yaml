@@ -12,4 +12,4 @@ train:
   total_steps: 300000
   max_batch_frames: 24000   # mel frame 24 kHz/256 hop (~94 fps) -> ~4,3 phút audio / GPU / batch
   max_cer: 0.05
-  eval_every: 5000
+  eval_every: 3000

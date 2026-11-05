@@ -78,6 +78,38 @@ def collate(batch):
     return x, x_lens, y, y_lens, torch.tensor(spks), list(texts)
 
 
+SAMPLE_TEXTS = [
+    "Xin chào, tôi là trợ lý ảo của bạn, hôm nay tôi có thể giúp gì cho bạn?",
+    "Ngày 5/11/2026, giá vàng trong nước tăng thêm 1.500.000đ mỗi lượng.",
+    "Quý khách vui lòng giữ máy, cuộc gọi sẽ được chuyển tới tổng đài viên trong giây lát.",
+]
+
+
+def save_samples(model, out_dir: str, step: int, device, vocab, blank: int, log=print):
+    """Tổng hợp vài câu cố định ở mỗi lượt đánh giá -> nghe được model tiến bộ theo thời gian."""
+    try:
+        import soundfile as sf
+        from vocos import Vocos
+    except ImportError:
+        log("bỏ qua lưu mẫu: chưa cài vocos/soundfile")
+        return
+    from ..text.normalize import normalize
+
+    global _VOCOS
+    if "_VOCOS" not in globals():
+        _VOCOS = Vocos.from_pretrained("charactr/vocos-mel-24khz").to(device).eval()
+    d = os.path.join(out_dir, "samples", f"step_{step:07d}")
+    os.makedirs(d, exist_ok=True)
+    model.eval()
+    with torch.no_grad():
+        for k, text in enumerate(SAMPLE_TEXTS):
+            ids = torch.tensor([intersperse(vocab.encode(normalize(text, keep_punct=True)), blank)], device=device)
+            mel, _ = model.synthesize(ids, torch.tensor([ids.shape[1]], device=device), n_steps=10, temperature=0.667)
+            wav = _VOCOS.decode(mel.float())[0].clamp(-1, 1).cpu().numpy()
+            sf.write(os.path.join(d, f"{k}.wav"), wav, 24000)
+    model.train()
+
+
 DEFAULTS = {"model": {}, "train": {"lr": 2e-4, "warmup_steps": 2000, "total_steps": 300000, "weight_decay": 0.0,
             "max_batch_frames": 24000, "grad_clip": 1.0, "num_workers": 2, "log_every": 50, "eval_every": 2000,
             "save_every_min": 20, "seed": 1234, "max_cer": 0.05}}
@@ -197,6 +229,7 @@ def main(argv=None):
                 with open(log_path, "a") as f:
                     f.write(json.dumps(rec) + "\n")
                 model.train()
+                save_samples(model, args.out, step, device, train_set.vocab, train_set.blank, log)
 
             out_of_time = bool(args.max_hours and (time.time() - t_start) / 3600 > args.max_hours)
             out_of_steps = bool((args.max_steps and step >= args.max_steps) or step >= tc["total_steps"])

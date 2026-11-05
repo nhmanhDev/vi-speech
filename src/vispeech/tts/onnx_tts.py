@@ -52,7 +52,7 @@ class OnnxTTS:
 
     def mel(self, text: str, n_steps: int = 4, temperature: float = 0.667, length_scale: float = 1.0, seed: int = 0):
         mu_x, logw = self.enc.run(None, {"ids": self.ids(text)})
-        w = np.ceil(np.exp(logw[0, 0]) * length_scale).astype(np.int64)
+        w = np.minimum(np.ceil(np.exp(logw[0, 0]) * length_scale), 60).astype(np.int64)  # giống MatchaTTS.synthesize
         ty = int(w.sum())
         T = int(math.ceil(ty / self.cfg["align"]) * self.cfg["align"])
         mu_y = np.repeat(mu_x[0], w, axis=1)  # length regulator: lặp μ theo số frame

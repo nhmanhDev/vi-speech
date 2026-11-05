@@ -332,7 +332,8 @@ class MatchaTTS(nn.Module):
         """Trả log-mel (B, n_feats, Ty) và số frame."""
         s = self.spk_emb(spk) if self.spk_emb is not None else None
         mu_x, logw, x_mask = self.encoder(x, x_lens, s)
-        w = torch.ceil(torch.exp(logw) * x_mask * length_scale)[:, 0]  # (B, Tx)
+        # chặn trên 60 frame (~0,64 s) mỗi token: model chưa hội tụ có thể đoán độ dài vô lý -> tràn bộ nhớ
+        w = torch.ceil(torch.exp(logw) * x_mask * length_scale).clamp(max=60)[:, 0]  # (B, Tx)
         y_lens = w.sum(1).clamp(min=1).long()
         ty = self._fix_len(int(y_lens.max()))
         y_mask = sequence_mask(y_lens, ty)[:, None, :]
