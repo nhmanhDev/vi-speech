@@ -33,11 +33,21 @@ class TTSDataset(Dataset):
         self.vocab = Vocab(with_punct=True)
         self.blank = len(self.vocab)  # token chèn giữa ký tự
         self.mels, self.items, self.speakers = [], [], {}
-        self.stats = {"total": 0, "cer": 0, "length": 0, "no_asr": 0}
+        self.stats = {"total": 0, "cer": 0, "length": 0, "no_asr": 0, "no_prosody": 0}
+        self.prosody_stats: dict = {}  # speaker -> {mean, std} (cần khi suy luận để đổi mong muốn -> z-score)
         for di, d in enumerate([dirs] if isinstance(dirs, str) else dirs):
             with open(os.path.join(d, "meta.json")) as f:
                 meta = json.load(f)
             self.mels.append(np.memmap(os.path.join(d, "mel.f16"), dtype=np.float16, mode="r", shape=(meta["mel_frames"], 100)))
+            pros: dict = {}
+            pp = os.path.join(d, "prosody.jsonl")
+            if os.path.exists(pp):
+                with open(pp) as f:
+                    for line in f:
+                        r = json.loads(line)
+                        pros[r["id"]] = r["z"]
+                with open(os.path.join(d, "prosody_stats.json")) as f:
+                    self.prosody_stats.update(json.load(f)["speakers"])
             asr = os.path.join(d, "index.asr.jsonl")
             path = asr if os.path.exists(asr) else os.path.join(d, "index.jsonl")
             with open(path, encoding="utf-8") as f:
@@ -55,27 +65,30 @@ class TTSDataset(Dataset):
                     if (zlib.crc32(r["id"].encode()) % 10000 < dev_percent * 100) != (split == "dev"):
                         continue
                     spk = self.speakers.setdefault(r["speaker"], len(self.speakers))
-                    self.items.append((di, r["mel_offset"], r["mel_frames"], r["text"], spk))
+                    z = pros.get(r["id"])
+                    self.stats["no_prosody"] += z is None
+                    self.items.append((di, r["mel_offset"], r["mel_frames"], r["text"], spk, z))
 
     def __len__(self):
         return len(self.items)
 
     def __getitem__(self, i):
-        di, off, n, text, spk = self.items[i]
+        di, off, n, text, spk, z = self.items[i]
         mel = torch.from_numpy(np.asarray(self.mels[di][off : off + n], dtype=np.float32)).T  # (100, T)
         x = torch.tensor(intersperse(self.vocab.encode(text), self.blank))
-        return x, mel, spk, text
+        pros = torch.tensor(z if z is not None else [0.0, 0.0, 0.0], dtype=torch.float32)  # thiếu -> trung bình
+        return x, mel, spk, text, pros
 
 
 def collate(batch):
-    xs, mels, spks, texts = zip(*batch)
+    xs, mels, spks, texts, pros = zip(*batch)
     x_lens = torch.tensor([len(x) for x in xs])
     y_lens = torch.tensor([m.shape[1] for m in mels])
     x = torch.nn.utils.rnn.pad_sequence(xs, batch_first=True)
     y = torch.zeros(len(mels), 100, int(y_lens.max()))
     for i, m in enumerate(mels):
         y[i, :, : m.shape[1]] = m
-    return x, x_lens, y, y_lens, torch.tensor(spks), list(texts)
+    return x, x_lens, y, y_lens, torch.tensor(spks), list(texts), torch.stack(pros)
 
 
 SAMPLE_TEXTS = [
@@ -85,7 +98,14 @@ SAMPLE_TEXTS = [
 ]
 
 
-def save_samples(model, out_dir: str, step: int, device, vocab, blank: int, log=print):
+STYLES = {  # kiểu ngữ điệu minh hoạ (chỉ dùng khi model có n_prosody)
+    "binh_thuong": dict(),
+    "hao_hung": dict(pitch_st=2.0, range_scale=1.3, rate=1.12),
+    "tram_buon": dict(pitch_st=-1.5, range_scale=0.75, rate=0.88),
+}
+
+
+def save_samples(model, out_dir: str, step: int, device, vocab, blank: int, log=print, prosody_stats=None):
     """Tổng hợp vài câu cố định ở mỗi lượt đánh giá -> nghe được model tiến bộ theo thời gian."""
     try:
         import soundfile as sf
@@ -101,12 +121,21 @@ def save_samples(model, out_dir: str, step: int, device, vocab, blank: int, log=
     d = os.path.join(out_dir, "samples", f"step_{step:07d}")
     os.makedirs(d, exist_ok=True)
     model.eval()
+    styles = {"": None}
+    if model.cfg.n_prosody and prosody_stats:
+        from .prosody import offsets_to_z
+
+        st = next(iter(prosody_stats.values()))
+        styles = {f"_{name}": torch.tensor([offsets_to_z(st, **kw)], device=device) for name, kw in STYLES.items()}
     with torch.no_grad():
         for k, text in enumerate(SAMPLE_TEXTS):
             ids = torch.tensor([intersperse(vocab.encode(normalize(text, keep_punct=True)), blank)], device=device)
-            mel, _ = model.synthesize(ids, torch.tensor([ids.shape[1]], device=device), n_steps=10, temperature=0.667)
-            wav = _VOCOS.decode(mel.float())[0].clamp(-1, 1).cpu().numpy()
-            sf.write(os.path.join(d, f"{k}.wav"), wav, 24000)
+            for suffix, pros in styles.items():
+                torch.manual_seed(0)
+                mel, _ = model.synthesize(ids, torch.tensor([ids.shape[1]], device=device), n_steps=10, temperature=0.667,
+                                          prosody=pros)
+                wav = _VOCOS.decode(mel.float())[0].clamp(-1, 1).cpu().numpy()
+                sf.write(os.path.join(d, f"{k}{suffix}.wav"), wav, 24000)
     model.train()
 
 
@@ -155,12 +184,14 @@ def main(argv=None):
     log(f"train={len(train_set)} dev={len(dev_set)} filter={train_set.stats} speakers={train_set.speakers}")
     if train_set.stats["no_asr"]:
         log("CẢNH BÁO: dữ liệu chưa qua asr_filter, không lọc được câu nhãn sai")
+    if cfg["model"].get("n_prosody") and not train_set.prosody_stats:
+        raise SystemExit("config bật n_prosody nhưng chưa có prosody.jsonl: chạy python -m vispeech.tts.prosody --data ...")
 
     mcfg = MatchaConfig(**{**cfg["model"], "vocab_size": train_set.blank + 1, "n_speakers": max(1, len(train_set.speakers))})
     model = MatchaTTS(mcfg).to(device)
     # Chuẩn hoá mel toàn cục (Matcha dùng mean/std của dataset)
     sample = np.concatenate([np.asarray(train_set.mels[di][off : off + n], dtype=np.float32)
-                             for di, off, n, _, _ in random.Random(0).sample(train_set.items, min(500, len(train_set)))])
+                             for di, off, n, *_ in random.Random(0).sample(train_set.items, min(500, len(train_set)))])
     model.set_mel_stats(float(sample.mean()), float(sample.std()))
     log(f"params={sum(p.numel() for p in model.parameters()) / 1e6:.1f}M mel mean={sample.mean():.3f} std={sample.std():.3f}")
 
@@ -181,6 +212,7 @@ def main(argv=None):
     def checkpoint(name="last.pt"):
         if is_main:
             save(os.path.join(args.out, name), model=model.state_dict(), opt=opt.state_dict(), scaler=scaler.state_dict(),
+                 prosody_stats=train_set.prosody_stats, speakers=train_set.speakers,
                  step=step, epoch=epoch, model_config=vars(mcfg), config=cfg, vocab_with_punct=True)
 
     lengths = [it[2] for it in train_set.items]
@@ -192,10 +224,10 @@ def main(argv=None):
         t_log, acc = time.time(), {"dur": 0.0, "prior": 0.0, "fm": 0.0}
         n_acc = 0
         loader = DataLoader(train_set, batch_sampler=sampler, collate_fn=collate, num_workers=tc["num_workers"], pin_memory=use_amp)
-        for x, xl, y, yl, spk, _ in loader:
-            x, xl, y, yl, spk = (t.to(device, non_blocking=True) for t in (x, xl, y, yl, spk))
+        for x, xl, y, yl, spk, _, pros in loader:
+            x, xl, y, yl, spk, pros = (t.to(device, non_blocking=True) for t in (x, xl, y, yl, spk, pros))
             with torch.autocast(device.type, dtype=torch.float16, enabled=use_amp):
-                losses = train_model(x, xl, y, yl, spk if mcfg.n_speakers > 1 else None)
+                losses = train_model(x, xl, y, yl, spk if mcfg.n_speakers > 1 else None, pros if mcfg.n_prosody else None)
             loss = losses["dur"].float() + losses["prior"].float() + losses["fm"].float()
             for g in opt.param_groups:
                 g["lr"] = lr_at(step, tc)
@@ -221,15 +253,15 @@ def main(argv=None):
             if step % tc["eval_every"] == 0 and is_main and len(dev_set):
                 model.eval()
                 with torch.no_grad():
-                    xs, xls, ys, yls, spks, _ = collate([dev_set[i] for i in range(min(16, len(dev_set)))])
+                    xs, xls, ys, yls, spks, _, prs = collate([dev_set[i] for i in range(min(16, len(dev_set)))])
                     l = model(xs.to(device), xls.to(device), ys.to(device), yls.to(device),
-                              spks.to(device) if mcfg.n_speakers > 1 else None)
+                              spks.to(device) if mcfg.n_speakers > 1 else None, prs.to(device) if mcfg.n_prosody else None)
                 rec = {"step": step, "dev": {k: float(v) for k, v in l.items() if k != "attn"}}
                 log(json.dumps(rec), flush=True)
                 with open(log_path, "a") as f:
                     f.write(json.dumps(rec) + "\n")
                 model.train()
-                save_samples(model, args.out, step, device, train_set.vocab, train_set.blank, log)
+                save_samples(model, args.out, step, device, train_set.vocab, train_set.blank, log, train_set.prosody_stats)
 
             out_of_time = bool(args.max_hours and (time.time() - t_start) / 3600 > args.max_hours)
             out_of_steps = bool((args.max_steps and step >= args.max_steps) or step >= tc["total_steps"])

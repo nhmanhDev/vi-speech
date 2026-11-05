@@ -32,6 +32,20 @@ class _Enc(nn.Module):
         return mu, logw
 
 
+class _EncPros(nn.Module):
+    """Encoder có điều khiển ngữ điệu: nhận prosody z-score, trả thêm vector điều kiện cho decoder."""
+
+    def __init__(self, m):
+        super().__init__()
+        self.m = m
+
+    def forward(self, ids, prosody):
+        lens = torch.full((ids.shape[0],), ids.shape[1], dtype=torch.long)
+        cond = self.m.make_cond(ids.shape[0], ids.device, None, prosody)
+        mu, logw, _ = self.m.encoder(ids, lens, cond)
+        return mu, logw, cond
+
+
 class _Dec(nn.Module):
     def __init__(self, m):
         super().__init__()
@@ -39,6 +53,15 @@ class _Dec(nn.Module):
 
     def forward(self, z, mask, mu, t):
         return self.m.decoder(z, mask.bool(), mu, t, None)
+
+
+class _DecCond(nn.Module):
+    def __init__(self, m):
+        super().__init__()
+        self.m = m
+
+    def forward(self, z, mask, mu, t, cond):
+        return self.m.decoder(z, mask.bool(), mu, t, cond)
 
 
 class _Vocos(nn.Module):
@@ -52,11 +75,12 @@ class _Vocos(nn.Module):
         return torch.exp(mag).clamp(max=1e2), p  # giống vocos.heads.ISTFTHead
 
 
-def load(ckpt):
+def load(ckpt, with_meta: bool = False):
     ck = torch.load(ckpt, map_location="cpu", weights_only=False)
     m = MatchaTTS(MatchaConfig(**ck["model_config"]))
     m.load_state_dict(ck["model"])
-    return m.eval()
+    m.eval()
+    return (m, ck) if with_meta else m
 
 
 def main(argv=None):
@@ -66,17 +90,27 @@ def main(argv=None):
     ap.add_argument("--vocos", default="charactr/vocos-mel-24khz")
     args = ap.parse_args(argv)
     os.makedirs(args.out, exist_ok=True)
-    m = load(args.ckpt)
+    m, ck = load(args.ckpt, with_meta=True)
     if m.cfg.n_speakers > 1:
         raise SystemExit("export đa giọng: chưa hỗ trợ")
     F_ = m.cfg.n_feats
+    P = m.cfg.n_prosody
     kw = dict(opset_version=17, dynamo=False)
-    torch.onnx.export(_Enc(m), (torch.randint(1, 50, (1, 41)),), os.path.join(args.out, "encoder.onnx"),
-                      input_names=["ids"], output_names=["mu_x", "logw"], dynamic_axes={"ids": {1: "Tx"}, "mu_x": {2: "Tx"}, "logw": {2: "Tx"}}, **kw)
+    ids = torch.randint(1, 50, (1, 41))
     T = 128
-    torch.onnx.export(_Dec(m), (torch.randn(1, F_, T), torch.ones(1, 1, T), torch.randn(1, F_, T), torch.tensor([0.5])),
-                      os.path.join(args.out, "decoder.onnx"), input_names=["z", "mask", "mu", "t"], output_names=["v"],
-                      dynamic_axes={"z": {2: "T"}, "mask": {2: "T"}, "mu": {2: "T"}, "v": {2: "T"}}, **kw)
+    dec_in = (torch.randn(1, F_, T), torch.ones(1, 1, T), torch.randn(1, F_, T), torch.tensor([0.5]))
+    dyn_dec = {"z": {2: "T"}, "mask": {2: "T"}, "mu": {2: "T"}, "v": {2: "T"}}
+    if P:
+        torch.onnx.export(_EncPros(m), (ids, torch.zeros(1, P)), os.path.join(args.out, "encoder.onnx"),
+                          input_names=["ids", "prosody"], output_names=["mu_x", "logw", "cond"],
+                          dynamic_axes={"ids": {1: "Tx"}, "mu_x": {2: "Tx"}, "logw": {2: "Tx"}}, **kw)
+        torch.onnx.export(_DecCond(m), dec_in + (torch.zeros(1, m.cfg.cond_dim),), os.path.join(args.out, "decoder.onnx"),
+                          input_names=["z", "mask", "mu", "t", "cond"], output_names=["v"], dynamic_axes=dyn_dec, **kw)
+    else:
+        torch.onnx.export(_Enc(m), (ids,), os.path.join(args.out, "encoder.onnx"), input_names=["ids"],
+                          output_names=["mu_x", "logw"], dynamic_axes={"ids": {1: "Tx"}, "mu_x": {2: "Tx"}, "logw": {2: "Tx"}}, **kw)
+        torch.onnx.export(_Dec(m), dec_in, os.path.join(args.out, "decoder.onnx"), input_names=["z", "mask", "mu", "t"],
+                          output_names=["v"], dynamic_axes=dyn_dec, **kw)
     from vocos import Vocos
 
     voc = Vocos.from_pretrained(args.vocos).eval()
@@ -85,7 +119,8 @@ def main(argv=None):
                       dynamic_axes={"mel": {2: "T"}, "mag": {2: "T"}, "phase": {2: "T"}}, **kw)
     vocab = Vocab(with_punct=True)
     cfg = {"vocab": vocab.itos, "blank_id": len(vocab), "mel_mean": float(m.mel_mean), "mel_std": float(m.mel_std),
-           "n_feats": F_, "align": m.align, "sample_rate": 24000, "n_fft": 1024, "hop_length": 256}
+           "n_feats": F_, "align": m.align, "sample_rate": 24000, "n_fft": 1024, "hop_length": 256,
+           "n_prosody": P, "prosody_stats": next(iter(ck.get("prosody_stats", {}).values()), None)}
     with open(os.path.join(args.out, "config.json"), "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False)
     for fn in sorted(os.listdir(args.out)):

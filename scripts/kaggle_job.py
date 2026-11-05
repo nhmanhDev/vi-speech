@@ -101,13 +101,15 @@ sh("rm -rf /kaggle/working/runs_prev")
 
 
 TTS_TRAIN = BOOTSTRAP + r'''
-subprocess.run([sys.executable, "-m", "pip", "install", "-q", "vocos"], check=False)  # để lưu mẫu giọng mỗi lượt đánh giá
+subprocess.run([sys.executable, "-m", "pip", "install", "-q", "vocos", "praat-parselmouth"], check=False)  # mẫu giọng + đo ngữ điệu
 srcs = [os.path.dirname(p) for p in sorted(glob.glob("/kaggle/input/**/tts/*/meta.json", recursive=True))]
 dsts = []
 for s_ in srcs:  # copy sang ổ local (ổ /kaggle/input đọc ngẫu nhiên rất chậm)
     d_ = "/tmp/tts/" + os.path.basename(s_)
     sh(f"mkdir -p /tmp/tts && cp -r {{s_}} {{d_}}")
     dsts.append(d_)
+if "prosody" in "{config}":  # đo ngữ điệu từng câu (CPU, vài phút) trước khi train
+    sh(f"python -m vispeech.tts.prosody --data {{' '.join(dsts)}} --workers 4")
 resume = " ".join(glob.glob("/kaggle/input/**/runs/{run}", recursive=True))
 sh(f"cp -r {{resume}} /kaggle/working/runs_prev || true") if resume else None
 import torch

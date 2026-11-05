@@ -1,0 +1,18 @@
+# Matcha-TTS + điều khiển ngữ điệu (cao độ, biên độ cao độ, tốc độ). Cần chạy vispeech.tts.prosody trước.
+model:
+  enc_dim: 192
+  enc_layers: 6
+  enc_heads: 2
+  enc_ff: 768
+  dec_channels: [256, 256]
+  dec_mid_blocks: 2
+  n_prosody: 3
+  pros_dim: 32
+  cond_drop: 0.2
+train:
+  lr: 1.0e-4
+  warmup_steps: 1000
+  total_steps: 300000
+  max_batch_frames: 24000
+  max_cer: 0.05
+  eval_every: 3000

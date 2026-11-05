@@ -50,8 +50,21 @@ class OnnxTTS:
         out[1::2] = ids
         return np.array([out], dtype=np.int64)
 
-    def mel(self, text: str, n_steps: int = 4, temperature: float = 0.667, length_scale: float = 1.0, seed: int = 0):
-        mu_x, logw = self.enc.run(None, {"ids": self.ids(text)})
+    def prosody(self, pitch_st: float = 0.0, range_scale: float = 1.0, rate: float = 1.0) -> np.ndarray | None:
+        """Mong muốn ngữ điệu -> z-score cho model. Không có điều khiển ngữ điệu thì trả None."""
+        if not self.cfg.get("n_prosody"):
+            return None
+        from .prosody import offsets_to_z
+
+        return np.array([offsets_to_z(self.cfg["prosody_stats"], pitch_st, range_scale, rate)], dtype=np.float32)
+
+    def mel(self, text: str, n_steps: int = 4, temperature: float = 0.667, length_scale: float = 1.0, seed: int = 0,
+            pitch_st: float = 0.0, range_scale: float = 1.0, rate: float = 1.0):
+        cond = None
+        if self.cfg.get("n_prosody"):
+            mu_x, logw, cond = self.enc.run(None, {"ids": self.ids(text), "prosody": self.prosody(pitch_st, range_scale, rate)})
+        else:
+            mu_x, logw = self.enc.run(None, {"ids": self.ids(text)})
         w = np.minimum(np.ceil(np.exp(logw[0, 0]) * length_scale), 60).astype(np.int64)  # giống MatchaTTS.synthesize
         ty = int(w.sum())
         T = int(math.ceil(ty / self.cfg["align"]) * self.cfg["align"])
@@ -61,7 +74,10 @@ class OnnxTTS:
         mask[..., :ty] = 1
         z = np.random.default_rng(seed).standard_normal(mu_y.shape).astype(np.float32) * temperature
         for i in range(n_steps):
-            v = self.dec.run(None, {"z": z, "mask": mask, "mu": mu_y, "t": np.array([i / n_steps], dtype=np.float32)})[0]
+            feed = {"z": z, "mask": mask, "mu": mu_y, "t": np.array([i / n_steps], dtype=np.float32)}
+            if cond is not None:
+                feed["cond"] = cond
+            v = self.dec.run(None, feed)[0]
             z = z + v / n_steps
         return (z * self.cfg["mel_std"] + self.cfg["mel_mean"])[:, :, :ty]
 

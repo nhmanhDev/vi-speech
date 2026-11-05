@@ -43,6 +43,16 @@ class MatchaConfig:
     dec_heads: int = 4
     sigma_min: float = 1e-4
     segment_frames: int = 192  # train decoder trên đoạn ngẫu nhiên ~2 s (như Matcha) để tiết kiệm bộ nhớ
+    # Điều khiển ngữ điệu (prosody): vector z-score [cao độ, biên độ cao độ, năng lượng, tốc độ] mỗi câu.
+    # 0 = tắt. Khi train, với xác suất cond_drop thay bằng 0 (= ngữ điệu trung bình của người nói),
+    # để lúc suy luận không truyền gì cũng ra giọng "bình thường".
+    n_prosody: int = 0
+    pros_dim: int = 32
+    cond_drop: float = 0.2
+
+    @property
+    def cond_dim(self) -> int:
+        return (self.spk_dim if self.n_speakers > 1 else 0) + (self.pros_dim if self.n_prosody > 0 else 0)
 
 
 def sequence_mask(lengths: torch.Tensor, max_len: int | None = None) -> torch.Tensor:
@@ -102,8 +112,8 @@ class TextEncoder(nn.Module):
         self.emb = nn.Embedding(cfg.vocab_size, d)
         nn.init.normal_(self.emb.weight, 0.0, d**-0.5)
         self.prenet = nn.Sequential(*[m for _ in range(3) for m in (nn.Conv1d(d, d, 5, padding=2), LayerNormC(d), nn.ReLU(), nn.Dropout(0.5))])
-        self.spk = cfg.n_speakers > 1
-        d_in = d + (cfg.spk_dim if self.spk else 0)
+        self.cond_dim = cfg.cond_dim
+        d_in = d + self.cond_dim
         self.layers = nn.ModuleList(EncoderLayer(d_in, cfg.enc_heads, cfg.enc_ff, cfg.enc_kernel, cfg.dropout) for _ in range(cfg.enc_layers))
         self.proj_mu = nn.Conv1d(d_in, cfg.n_feats, 1)
         # Duration predictor (2 conv) trên đầu ra encoder đã detach, như Glow-TTS/Matcha
@@ -113,12 +123,13 @@ class TextEncoder(nn.Module):
             nn.Conv1d(cfg.dp_dim, 1, 1),
         )
 
-    def forward(self, x, x_lens, spk_emb=None):
+    def forward(self, x, x_lens, cond=None):
+        """cond: (B, cond_dim) = [speaker embedding, prosody embedding] hoặc None."""
         mask = sequence_mask(x_lens, x.shape[1])[:, None, :]  # (B, 1, T)
         h = self.emb(x).transpose(1, 2) * mask
         h = h + self.prenet(h) * mask  # residual prenet
-        if self.spk:
-            h = torch.cat([h, spk_emb[:, :, None].expand(-1, -1, h.shape[-1])], 1)
+        if self.cond_dim:
+            h = torch.cat([h, cond[:, :, None].expand(-1, -1, h.shape[-1])], 1)
         for layer in self.layers:
             h = layer(h, mask)
         mu = self.proj_mu(h) * mask
@@ -224,7 +235,7 @@ class UNetDecoder(nn.Module):
     def __init__(self, cfg: MatchaConfig):
         super().__init__()
         ch = list(cfg.dec_channels)
-        cin = 2 * cfg.n_feats + (cfg.spk_dim if cfg.n_speakers > 1 else 0)
+        cin = 2 * cfg.n_feats + cfg.cond_dim
         tdim = ch[0] * 4
         self.tdim0 = ch[0]
         self.tmlp = nn.Sequential(nn.Linear(ch[0], tdim), nn.SiLU(), nn.Linear(tdim, tdim))
@@ -247,9 +258,9 @@ class UNetDecoder(nn.Module):
         self.final = nn.Sequential(nn.Conv1d(ch[0], ch[0], 3, padding=1), nn.GroupNorm(8, ch[0]), nn.Mish(), nn.Conv1d(ch[0], cfg.n_feats, 1))
         self.n_down = len(ch) - 1
 
-    def forward(self, x, mask, mu, t, spk=None):
+    def forward(self, x, mask, mu, t, cond=None):
         temb = self.tmlp(time_embedding(t, self.tdim0))
-        h = torch.cat([x, mu] + ([spk[:, :, None].expand(-1, -1, x.shape[-1])] if spk is not None else []), 1)
+        h = torch.cat([x, mu] + ([cond[:, :, None].expand(-1, -1, x.shape[-1])] if cond is not None else []), 1)
         masks, skips = [mask], []
         for res, tr, down in self.down:
             m = masks[-1]
@@ -279,6 +290,8 @@ class MatchaTTS(nn.Module):
         self.encoder = TextEncoder(cfg)
         self.decoder = UNetDecoder(cfg)
         self.spk_emb = nn.Embedding(cfg.n_speakers, cfg.spk_dim) if cfg.n_speakers > 1 else None
+        self.pros_proj = (nn.Sequential(nn.Linear(cfg.n_prosody, cfg.pros_dim), nn.SiLU(), nn.Linear(cfg.pros_dim, cfg.pros_dim))
+                          if cfg.n_prosody > 0 else None)
         self.register_buffer("mel_mean", torch.zeros(1))
         self.register_buffer("mel_std", torch.ones(1))
         self.align = 2 ** (len(cfg.dec_channels) - 1)
@@ -287,13 +300,27 @@ class MatchaTTS(nn.Module):
         self.mel_mean.fill_(mean)
         self.mel_std.fill_(std)
 
+    def make_cond(self, batch: int, device, spk=None, prosody=None):
+        """Ghép vector điều kiện. prosody=None -> 0 (ngữ điệu trung bình)."""
+        parts = []
+        if self.spk_emb is not None:
+            parts.append(self.spk_emb(spk if spk is not None else torch.zeros(batch, dtype=torch.long, device=device)))
+        if self.pros_proj is not None:
+            if prosody is None:
+                prosody = torch.zeros(batch, self.cfg.n_prosody, device=device)
+            parts.append(self.pros_proj(prosody))
+        return torch.cat(parts, -1) if parts else None
+
     def _fix_len(self, n: int) -> int:
         return int(math.ceil(n / self.align) * self.align)
 
-    def forward(self, x, x_lens, y, y_lens, spk=None):
-        """x (B, Tx) id ký tự; y (B, n_feats, Ty) log-mel. Trả dict các loss."""
+    def forward(self, x, x_lens, y, y_lens, spk=None, prosody=None):
+        """x (B, Tx) id ký tự; y (B, n_feats, Ty) log-mel; prosody (B, n_prosody) z-score. Trả dict các loss."""
         cfg = self.cfg
-        s = self.spk_emb(spk) if self.spk_emb is not None else None
+        if prosody is not None and self.training and cfg.cond_drop > 0:
+            keep = (torch.rand(prosody.shape[0], 1, device=prosody.device) >= cfg.cond_drop).float()
+            prosody = prosody * keep
+        s = self.make_cond(x.shape[0], x.device, spk, prosody)
         y = (y - self.mel_mean) / self.mel_std
         mu_x, logw, x_mask = self.encoder(x, x_lens, s)
         y_mask = sequence_mask(y_lens, y.shape[-1])[:, None, :]
@@ -328,9 +355,10 @@ class MatchaTTS(nn.Module):
         return {"dur": dur_loss, "prior": prior_loss, "fm": fm_loss, "attn": attn}
 
     @torch.no_grad()
-    def synthesize(self, x, x_lens, n_steps: int = 4, temperature: float = 0.667, length_scale: float = 1.0, spk=None):
-        """Trả log-mel (B, n_feats, Ty) và số frame."""
-        s = self.spk_emb(spk) if self.spk_emb is not None else None
+    def synthesize(self, x, x_lens, n_steps: int = 4, temperature: float = 0.667, length_scale: float = 1.0, spk=None,
+                   prosody=None):
+        """Trả log-mel (B, n_feats, Ty) và số frame. prosody: (B, n_prosody) z-score, None = trung bình."""
+        s = self.make_cond(x.shape[0], x.device, spk, prosody)
         mu_x, logw, x_mask = self.encoder(x, x_lens, s)
         # chặn trên 60 frame (~0,64 s) mỗi token: model chưa hội tụ có thể đoán độ dài vô lý -> tràn bộ nhớ
         w = torch.ceil(torch.exp(logw) * x_mask * length_scale).clamp(max=60)[:, 0]  # (B, Tx)

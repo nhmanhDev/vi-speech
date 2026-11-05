@@ -104,3 +104,74 @@ def test_tts_onnx_matches_torch(tmp_path):
     out = tts.mel("xin chào, việt nam!", n_steps=3, temperature=0.0)
     np.testing.assert_allclose(out[0], ref[0, :, : out.shape[2]].numpy(), atol=1e-3)
     assert len(tts("xin chào")) > 0
+
+
+# ------------------------------------------------------------------ prosody (điều khiển ngữ điệu)
+
+PROS = MatchaConfig(**{**vars(TINY), "n_prosody": 3, "pros_dim": 8})
+
+
+def test_prosody_features_on_real_voice():
+    import os
+
+    import soundfile as sf
+
+    from vispeech.tts.prosody import features
+
+    w, sr = sf.read(os.path.join(os.path.dirname(__file__), "fixtures", "infore_00002.flac"), dtype="float32")
+    pitch, rng, rate = features(w, sr, n_syllables=22)
+    assert 10 < pitch < 17  # giọng nữ InfoRe ~ 180-270 Hz = 10-17 semitone trên 100 Hz
+    assert 2 < rng < 15
+    assert 0.9 < np.exp(rate) < 6  # âm tiết / giây
+
+
+def test_offsets_to_z_roundtrip():
+    from vispeech.tts.prosody import offsets_to_z
+
+    st = {"mean": [13.0, 7.0, 1.3], "std": [1.0, 2.0, 0.1]}
+    assert offsets_to_z(st) == pytest.approx([0, 0, 0])
+    z = offsets_to_z(st, pitch_st=2.0, range_scale=1.5, rate=float(np.exp(0.1)))
+    assert z == pytest.approx([2.0, 1.75, 1.0])
+
+
+def test_prosody_changes_output_and_dropout():
+    torch.manual_seed(0)
+    m = MatchaTTS(PROS).eval()
+    torch.nn.init.zeros_(m.encoder.dp[-1].weight)
+    torch.nn.init.constant_(m.encoder.dp[-1].bias, 1.0)
+    x = torch.randint(1, 50, (1, 12))
+    a, _ = m.synthesize(x, torch.tensor([12]), n_steps=2, temperature=0.0)
+    b, _ = m.synthesize(x, torch.tensor([12]), n_steps=2, temperature=0.0, prosody=torch.tensor([[2.0, 1.0, -1.0]]))
+    c, _ = m.synthesize(x, torch.tensor([12]), n_steps=2, temperature=0.0, prosody=torch.zeros(1, 3))
+    assert not torch.allclose(a, b)
+    torch.testing.assert_close(a, c)  # không truyền prosody = ngữ điệu trung bình (z = 0)
+    m.train()
+    out = m(x.repeat(4, 1), torch.full((4,), 12), torch.randn(4, 100, 40), torch.full((4,), 40), prosody=torch.ones(4, 3))
+    (out["dur"] + out["prior"] + out["fm"]).backward()
+    assert m.pros_proj[0].weight.grad is not None
+
+
+def test_tts_onnx_with_prosody_matches_torch(tmp_path):
+    pytest.importorskip("vocos")
+    from vispeech.tts.export import main as export_main
+    from vispeech.tts.onnx_tts import OnnxTTS
+
+    torch.manual_seed(0)
+    cfg = MatchaConfig(**{**vars(PROS), "vocab_size": 101})
+    m = MatchaTTS(cfg).eval()
+    torch.nn.init.zeros_(m.encoder.dp[-1].weight)
+    torch.nn.init.constant_(m.encoder.dp[-1].bias, 1.0)
+    stats = {"infore": {"mean": [13.0, 7.0, 1.3], "std": [1.0, 2.0, 0.1], "n": 10}}
+    ck = tmp_path / "m.pt"
+    torch.save({"model": m.state_dict(), "model_config": vars(cfg), "prosody_stats": stats}, ck)
+    try:
+        export_main(["--ckpt", str(ck), "--out", str(tmp_path / "onnx")])
+    except OSError:
+        pytest.skip("không tải được Vocos (offline)")
+    tts = OnnxTTS(str(tmp_path / "onnx"))
+    ids = tts.ids("xin chào")
+    z = torch.tensor(tts.prosody(pitch_st=2.0, rate=1.1))
+    with torch.no_grad():
+        ref, _ = m.synthesize(torch.from_numpy(ids), torch.tensor([ids.shape[1]]), n_steps=3, temperature=0.0, prosody=z)
+    out = tts.mel("xin chào", n_steps=3, temperature=0.0, pitch_st=2.0, rate=1.1)
+    np.testing.assert_allclose(out[0], ref[0, :, : out.shape[2]].numpy(), atol=1e-3)
