@@ -12,6 +12,8 @@ Nhận dạng giọng nói (STT) và tổng hợp giọng nói (TTS) tiếng Vi�
 | File | Nội dung |
 |---|---|
 | [docs/DATA.md](docs/DATA.md) | Dùng bộ dữ liệu nào, lấy ở đâu, từng bước xử lý và lý do, còn lại bao nhiêu sau mỗi bước |
+| [docs/DATA_ANALYSIS.md](docs/DATA_ANALYSIS.md) | Phân tích sâu chất lượng dữ liệu, so sánh các nguồn ứng viên, khoảng trống so với mục tiêu, phép đo cần làm trước khi tốn GPU, sổ ghi sai sót |
+| [docs/TAG_PILOT.md](docs/TAG_PILOT.md) | Pilot đào tiếng cười, thở, ho từ dữ liệu free (kết quả âm) |
 | [docs/TRAINING.md](docs/TRAINING.md) | Nhật ký mọi lượt train trên GPU: cấu hình, kết quả, vì sao dừng, giới hạn Kaggle |
 | [docs/AGENT.md](docs/AGENT.md) | Voice agent: kiến trúc, độ trễ đo được, barge-in, quyết định thiết kế |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Việc đã xong / sắp làm |

@@ -1,5 +1,7 @@
 # Dữ liệu: dùng bộ nào, lấy ở đâu, xử lý ra sao
 
+> Phân tích sâu chất lượng, so sánh nguồn ứng viên và khoảng trống: xem [DATA_ANALYSIS.md](DATA_ANALYSIS.md). Kết quả pilot đào thẻ không lời: [TAG_PILOT.md](TAG_PILOT.md).
+
 Tài liệu này trả lời 3 câu hỏi: **đang dùng dữ liệu gì**, **mỗi bước xử lý làm gì và vì sao**, **còn lại bao nhiêu
 sau mỗi bước**. Mọi con số dưới đây lấy từ file `meta.json` / `asr_report.json` do chính pipeline sinh ra (ngày 2026-11-05),
 không phải ước lượng.
