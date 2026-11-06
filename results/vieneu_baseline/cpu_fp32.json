@@ -1,0 +1,146 @@
+[
+ {
+  "ref": "ref_infore",
+  "kind": "plain",
+  "dur": 7.04,
+  "sec": 21.7,
+  "rtf": 3.083,
+  "file": "out_fp32_ref_infore_plain.wav",
+  "text": "Xin chào anh, hôm nay em sẽ giới thiệu về dự án tổng hợp giọng nói tiếng Việt chạy trên máy tính cá nhân."
+ },
+ {
+  "ref": "ref_infore",
+  "kind": "laugh",
+  "dur": 4.96,
+  "sec": 5.46,
+  "rtf": 1.101,
+  "file": "out_fp32_ref_infore_laugh.wav",
+  "text": "Trời ơi, anh kể chuyện buồn cười quá [cười] em không nhịn được luôn."
+ },
+ {
+  "ref": "ref_infore",
+  "kind": "sigh",
+  "dur": 3.44,
+  "sec": 3.52,
+  "rtf": 1.024,
+  "file": "out_fp32_ref_infore_sigh.wav",
+  "text": "[thở dài] Thôi được rồi, để em làm lại từ đầu vậy."
+ },
+ {
+  "ref": "ref_infore",
+  "kind": "clear",
+  "dur": 4.0,
+  "sec": 4.08,
+  "rtf": 1.02,
+  "file": "out_fp32_ref_infore_clear.wav",
+  "text": "[hắng giọng] Xin phép mọi người, em bắt đầu buổi thuyết trình nhé."
+ },
+ {
+  "ref": "ref_podcast0",
+  "kind": "plain",
+  "dur": 5.52,
+  "sec": 12.56,
+  "rtf": 2.276,
+  "file": "out_fp32_ref_podcast0_plain.wav",
+  "text": "Xin chào anh, hôm nay em sẽ giới thiệu về dự án tổng hợp giọng nói tiếng Việt chạy trên máy tính cá nhân."
+ },
+ {
+  "ref": "ref_podcast0",
+  "kind": "laugh",
+  "dur": 3.6,
+  "sec": 4.04,
+  "rtf": 1.122,
+  "file": "out_fp32_ref_podcast0_laugh.wav",
+  "text": "Trời ơi, anh kể chuyện buồn cười quá [cười] em không nhịn được luôn."
+ },
+ {
+  "ref": "ref_podcast0",
+  "kind": "sigh",
+  "dur": 2.48,
+  "sec": 2.41,
+  "rtf": 0.973,
+  "file": "out_fp32_ref_podcast0_sigh.wav",
+  "text": "[thở dài] Thôi được rồi, để em làm lại từ đầu vậy."
+ },
+ {
+  "ref": "ref_podcast0",
+  "kind": "clear",
+  "dur": 2.8,
+  "sec": 2.77,
+  "rtf": 0.989,
+  "file": "out_fp32_ref_podcast0_clear.wav",
+  "text": "[hắng giọng] Xin phép mọi người, em bắt đầu buổi thuyết trình nhé."
+ },
+ {
+  "ref": "ref_podcast1",
+  "kind": "plain",
+  "dur": 6.0,
+  "sec": 11.06,
+  "rtf": 1.844,
+  "file": "out_fp32_ref_podcast1_plain.wav",
+  "text": "Xin chào anh, hôm nay em sẽ giới thiệu về dự án tổng hợp giọng nói tiếng Việt chạy trên máy tính cá nhân."
+ },
+ {
+  "ref": "ref_podcast1",
+  "kind": "laugh",
+  "dur": 3.76,
+  "sec": 4.75,
+  "rtf": 1.264,
+  "file": "out_fp32_ref_podcast1_laugh.wav",
+  "text": "Trời ơi, anh kể chuyện buồn cười quá [cười] em không nhịn được luôn."
+ },
+ {
+  "ref": "ref_podcast1",
+  "kind": "sigh",
+  "dur": 2.72,
+  "sec": 2.91,
+  "rtf": 1.069,
+  "file": "out_fp32_ref_podcast1_sigh.wav",
+  "text": "[thở dài] Thôi được rồi, để em làm lại từ đầu vậy."
+ },
+ {
+  "ref": "ref_podcast1",
+  "kind": "clear",
+  "dur": 3.04,
+  "sec": 3.57,
+  "rtf": 1.174,
+  "file": "out_fp32_ref_podcast1_clear.wav",
+  "text": "[hắng giọng] Xin phép mọi người, em bắt đầu buổi thuyết trình nhé."
+ },
+ {
+  "ref": "ref_fleurs_male",
+  "kind": "plain",
+  "dur": 8.64,
+  "sec": 15.18,
+  "rtf": 1.757,
+  "file": "out_fp32_ref_fleurs_male_plain.wav",
+  "text": "Xin chào anh, hôm nay em sẽ giới thiệu về dự án tổng hợp giọng nói tiếng Việt chạy trên máy tính cá nhân."
+ },
+ {
+  "ref": "ref_fleurs_male",
+  "kind": "laugh",
+  "dur": 7.12,
+  "sec": 8.88,
+  "rtf": 1.248,
+  "file": "out_fp32_ref_fleurs_male_laugh.wav",
+  "text": "Trời ơi, anh kể chuyện buồn cười quá [cười] em không nhịn được luôn."
+ },
+ {
+  "ref": "ref_fleurs_male",
+  "kind": "sigh",
+  "dur": 4.8,
+  "sec": 6.18,
+  "rtf": 1.287,
+  "file": "out_fp32_ref_fleurs_male_sigh.wav",
+  "text": "[thở dài] Thôi được rồi, để em làm lại từ đầu vậy."
+ },
+ {
+  "ref": "ref_fleurs_male",
+  "kind": "clear",
+  "dur": 4.16,
+  "sec": 4.21,
+  "rtf": 1.012,
+  "file": "out_fp32_ref_fleurs_male_clear.wav",
+  "text": "[hắng giọng] Xin phép mọi người, em bắt đầu buổi thuyết trình nhé."
+ }
+]

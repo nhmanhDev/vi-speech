@@ -1,0 +1,65 @@
+[
+ {
+  "ref": "ref_infore",
+  "kind": "plain",
+  "dur": 6.4,
+  "sec": 18.22,
+  "rtf": 2.846,
+  "file": "out_int8_ref_infore_plain.wav",
+  "text": "Xin chào anh, hôm nay em sẽ giới thiệu về dự án tổng hợp giọng nói tiếng Việt chạy trên máy tính cá nhân."
+ },
+ {
+  "ref": "ref_podcast0",
+  "kind": "plain",
+  "dur": 5.12,
+  "sec": 9.93,
+  "rtf": 1.939,
+  "file": "out_int8_ref_podcast0_plain.wav",
+  "text": "Xin chào anh, hôm nay em sẽ giới thiệu về dự án tổng hợp giọng nói tiếng Việt chạy trên máy tính cá nhân."
+ },
+ {
+  "ref": "ref_podcast0",
+  "kind": "laugh",
+  "dur": 3.84,
+  "sec": 2.8,
+  "rtf": 0.73,
+  "file": "out_int8_ref_podcast0_laugh.wav",
+  "text": "Trời ơi, anh kể chuyện buồn cười quá [cười] em không nhịn được luôn."
+ },
+ {
+  "ref": "ref_podcast0",
+  "kind": "sigh",
+  "dur": 2.48,
+  "sec": 1.84,
+  "rtf": 0.742,
+  "file": "out_int8_ref_podcast0_sigh.wav",
+  "text": "[thở dài] Thôi được rồi, để em làm lại từ đầu vậy."
+ },
+ {
+  "ref": "ref_podcast0",
+  "kind": "clear",
+  "dur": 2.96,
+  "sec": 2.32,
+  "rtf": 0.784,
+  "file": "out_int8_ref_podcast0_clear.wav",
+  "text": "[hắng giọng] Xin phép mọi người, em bắt đầu buổi thuyết trình nhé."
+ },
+ {
+  "ref": "ref_podcast1",
+  "kind": "plain",
+  "dur": 5.84,
+  "sec": 8.37,
+  "rtf": 1.433,
+  "file": "out_int8_ref_podcast1_plain.wav",
+  "text": "Xin chào anh, hôm nay em sẽ giới thiệu về dự án tổng hợp giọng nói tiếng Việt chạy trên máy tính cá nhân."
+ },
+ {
+  "ref": "ref_fleurs_male",
+  "kind": "plain",
+  "dur": 8.4,
+  "sec": 11.22,
+  "rtf": 1.335,
+  "file": "out_int8_ref_fleurs_male_plain.wav",
+  "text": "Xin chào anh, hôm nay em sẽ giới thiệu về dự án tổng hợp giọng nói tiếng Việt chạy trên máy tính cá nhân."
+ }
+]

@@ -1,0 +1,146 @@
+{
+ "3000": {
+  "0_binh_thuong": {
+   "pitch": 14.753312540342185,
+   "dur": 4.810666666666667,
+   "cer": 0.43137254901960786,
+   "hyp": "xin chào và khơi là trẻ hình tào của bạn tối hôm nay cơi có thế sức gì cho bạn."
+  },
+  "1_binh_thuong": {
+   "pitch": 14.40514778203264,
+   "dur": 7.498666666666667,
+   "cer": 0.24761904761904763,
+   "hyp": "ngày nắng tháng người lúc đang hai nghìn không trăm hai mươi sáu cô giáo vàng trong nước tăng thêm một triệu lạng trăm nhìn đồng môi hựa."
+  },
+  "2_binh_thuong": {
+   "pitch": 14.19431891782785,
+   "dur": 5.045333333333334,
+   "cer": 0.48484848484848486,
+   "hyp": "mình hát quên óng dựng bài tốt của quả xét được truyền tới tổng đài viên trong giây lặn."
+  },
+  "0_hao_hung": {
+   "pitch": 15.610148988736883,
+   "dur": 4.661333333333333
+  },
+  "1_hao_hung": {
+   "pitch": 15.213475490667129,
+   "dur": 7.285333333333333
+  },
+  "2_hao_hung": {
+   "pitch": 15.454990808880197,
+   "dur": 4.896
+  },
+  "0_tram_buon": {
+   "pitch": 13.3234431748023,
+   "dur": 4.896
+  },
+  "1_tram_buon": {
+   "pitch": 13.589230946775114,
+   "dur": 7.562666666666667
+  },
+  "2_tram_buon": {
+   "pitch": 13.51059742795012,
+   "dur": 5.109333333333334
+  }
+ },
+ "12000": {
+  "0_binh_thuong": {
+   "pitch": 13.845234258943606,
+   "dur": 5.301333333333333,
+   "cer": 0.1568627450980392,
+   "hyp": "xin chào của tôi là trợ lý ảo của bạn của hôm nay tôi có thể giúp gì cho bạn tự."
+  },
+  "1_binh_thuong": {
+   "pitch": 13.908668091927286,
+   "dur": 7.8613333333333335,
+   "cer": 0.0761904761904762,
+   "hyp": "ngày năm tháng mười một năm hai nghìn không trăm hai mươi sáu cấu giá vàng trong nước tăng thêm một triệu năm trăm nghìn đồng mỗi lượng tượng."
+  },
+  "2_binh_thuong": {
+   "pitch": 14.043731108950617,
+   "dur": 5.258666666666667,
+   "cer": 0.13636363636363635,
+   "hyp": "người khách vui lòng giữ máy ố cuộc gọi sẽ được chuyển tới tổng đài viên trong giây lát kết."
+  },
+  "0_hao_hung": {
+   "pitch": 14.980905609830405,
+   "dur": 4.789333333333333
+  },
+  "1_hao_hung": {
+   "pitch": 15.627306003671944,
+   "dur": 7.328
+  },
+  "2_hao_hung": {
+   "pitch": 14.950854320640623,
+   "dur": 4.832
+  },
+  "0_tram_buon": {
+   "pitch": 12.959319016706123,
+   "dur": 5.749333333333333
+  },
+  "1_tram_buon": {
+   "pitch": 12.69041289705101,
+   "dur": 8.330666666666668
+  },
+  "2_tram_buon": {
+   "pitch": 12.987726065985902,
+   "dur": 5.514666666666667
+  }
+ },
+ "24000": {
+  "0_binh_thuong": {
+   "pitch": 14.234056725386822,
+   "dur": 5.344,
+   "cer": 0.17647058823529413,
+   "hyp": "xin chào ô tô là chợ lí ảo của bạn cô hôm nay tôi có thể giúp gì cho bạn tự."
+  },
+  "1_binh_thuong": {
+   "pitch": 14.722563228574689,
+   "dur": 7.541333333333333,
+   "cer": 0.047619047619047616,
+   "hyp": "ngày năm tháng người một năm hai nghìn không trăm hai mươi sáu ô giá vàng trong nước tăng thêm một triệu năm trăm nghìn đồng mỗi lượng gỡ."
+  },
+  "2_binh_thuong": {
+   "pitch": 13.811433035084569,
+   "dur": 5.301333333333333,
+   "cer": 0.22727272727272727,
+   "hyp": "người khách vui lòng giữ máy ô cụp gọi sẽ được chuyển tới tổng đài viên trong dây lát đựng."
+  },
+  "0_hao_hung": {
+   "pitch": 15.584259353449111,
+   "dur": 4.917333333333334,
+   "cer": 0.11764705882352941,
+   "hyp": "xin chào ô tô là trợ lý ảo của bạn cô hôm nay tôi có thể giúp gì cho bạn tự."
+  },
+  "1_hao_hung": {
+   "pitch": 15.941095190715782,
+   "dur": 7.242666666666667,
+   "cer": 0.01904761904761905,
+   "hyp": "ngày năm tháng mười một năm hai nghìn không trăm hai mươi sáu ô giá vàng trong nước tăng thêm một triệu năm trăm nghìn đồng mỗi lượng ợ."
+  },
+  "2_hao_hung": {
+   "pitch": 15.540468623006666,
+   "dur": 4.96,
+   "cer": 0.10606060606060606,
+   "hyp": "quý khách vui lòng giữ máy ô cục gọi sẽ được chuyển tới tổng đài viên trong dây lát ấp."
+  },
+  "0_tram_buon": {
+   "pitch": 12.998169875318835,
+   "dur": 5.685333333333333,
+   "cer": 0.11764705882352941,
+   "hyp": "xin chào ôm tôi là trợ lý ảo của bạn cô hôm nay tôi có thể giúp gì cho bạn tự."
+  },
+  "1_tram_buon": {
+   "pitch": 12.707097941826714,
+   "dur": 8.138666666666667,
+   "cer": 0.05714285714285714,
+   "hyp": "ngày năm tháng mười một năm hai nghìn không trăm hai mươi sáu ô giá vàng trong nước tăng thêm một triệu năm trăm nghìn đồng mỗi lượng tượng."
+  },
+  "2_tram_buon": {
+   "pitch": 12.944571344690907,
+   "dur": 5.472,
+   "cer": 0.07575757575757576,
+   "hyp": "quý khách vui lòng giữ máy ô cuộc gọi sẽ được chuyển tới tổng đài viên trong dây lát tự."
+  }
+ }
+}
